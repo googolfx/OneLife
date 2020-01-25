@@ -13002,6 +13002,7 @@ static void leaderDied( LiveObject *inLeader ) {
 
 
 static void tryToStartKill( LiveObject *nextPlayer, int inTargetID ) {
+    if(false)
     if( inTargetID > 0 && 
         nextPlayer->holdingID > 0 &&
         canPlayerUseOrLearnTool( nextPlayer,
