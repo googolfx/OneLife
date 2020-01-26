@@ -8779,6 +8779,15 @@ int processLoggedInPlayer( char inAllowReconnect,
     // generate log line whenever a new baby is born
     logFamilyCounts();
     
+    char globalMsgBuffer[128];
+
+    if (newObject.familyName != NULL)
+        sprintf(globalMsgBuffer, "A new %s has been born.", newObject.familyName);
+    else
+        sprintf(globalMsgBuffer, "A new Eve has born.");
+
+    sendGlobalMessage(globalMsgBuffer);
+
     return newObject.id;
     }
 
@@ -19935,7 +19944,16 @@ int main() {
                               false,
                               nextPlayer->murderPerpID,
                               nextPlayer->murderPerpEmail );
-                                            
+                    
+                    char globalDeathMsg[128];
+                        
+                    if (nextPlayer->familyName != NULL)
+                        sprintf(globalDeathMsg, "%s has left the world.", nextPlayer->familyName);
+                    else
+                        sprintf(globalDeathMsg, "Someone has left the world.");
+
+                    sendGlobalMessage(globalDeathMsg);
+
                     if( shutdownMode ) {
                         handleShutdownDeath( 
                             nextPlayer, nextPlayer->xd, nextPlayer->yd );
