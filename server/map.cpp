@@ -3029,8 +3029,70 @@ void reseedMap( char inForceFresh ) {
         }
     }
 
+void regenMapObj()
+{
+    // re-place rand placement objects
+    CustomRandomSource placementRandSource( biomeRandSeedA );
 
+    int numObjects;
+    ObjectRecord **allObjects = getAllObjects( &numObjects );
 
+    for( int i=0; i<numObjects; i++ ) {
+        ObjectRecord *o = allObjects[i];
+
+        float p = o->mapChance;
+        if( p > 0 ) {
+            int id = o->id;
+
+            char *randPlacementLoc =
+                strstr( o->description, "randPlacement" );
+
+            if( randPlacementLoc != NULL ) {
+                // special random placement
+
+                int count = 10;
+                sscanf( randPlacementLoc, "randPlacement%d", &count );
+                count /= 10;
+
+                printf( "Placing %d random occurences of %d (%s) "
+                        "inside %d square radius:\n",
+                        count, id, o->description, barrierRadius );
+                for( int p=0; p<count; p++ ) {
+                    // sample until we find target biome
+                    int safeR = barrierRadius - 2;
+
+                    char placed = false;
+                    while( ! placed ) {
+                        int pickX =
+                            placementRandSource.
+                            getRandomBoundedInt( -safeR, safeR );
+                        int pickY =
+                            placementRandSource.
+                            getRandomBoundedInt( -safeR, safeR );
+
+                        int pickB = getMapBiome( pickX, pickY );
+
+                        for( int j=0; j< o->numBiomes; j++ ) {
+                            int b = o->biomes[j];
+
+                            if( b == pickB ) {
+                            	if(getMapObjectRaw(pickX, pickY) != 0)
+									  continue;
+
+                                // hit
+                                placed = true;
+                                printf( "  (%d,%d)\n", pickX, pickY );
+                                setMapObject( pickX, pickY, id );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    delete [] allObjects;
+
+}
 
 char initMap() {
 
@@ -5308,7 +5370,7 @@ int checkDecayObject( int inX, int inY, int inID ) {
                             break;
                             }
                         else if( oID > 0 && getObject( oID ) != NULL &&
-                                 getObject( oID )->blocksMoving ) {
+                                 getObject( oID )->blocksWalking ) {
                             // blocked, stop now
                             break;
                             }
@@ -5410,7 +5472,7 @@ int checkDecayObject( int inX, int inY, int inID ) {
                                     break;
                                     }
                                 else if( oID > 0 && getObject( oID ) != NULL &&
-                                         getObject( oID )->blocksMoving ) {
+                                         getObject( oID )->blocksWalking ) {
                                     // blocked, stop now
                                     break;
                                     }

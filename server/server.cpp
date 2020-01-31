@@ -5184,10 +5184,6 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
         // make a copy so we can delete it later
         cursedName = stringDuplicate( cursedName );
         }
-
-
-            
-    int curseDistance = SettingsManager::getIntSetting( "curseDistance", 200 );
     
         
     if( ! inPlayer->isTwin &&
@@ -5210,7 +5206,7 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
                 }
 
             if( distance( speakerPos, getPlayerPos( otherPlayer ) ) >
-                curseDistance ) {
+                getMaxChunkDimension() ) {
                 // only consider nearby players
                 continue;
                 }
@@ -5284,9 +5280,6 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
 
             if( dist > getMaxChunkDimension() ) {
                 // only consider nearby players
-                // don't use curseDistance setting here,
-                // because we don't want CURSE YOU to apply from too
-                // far away (would likely be a random target player)
                 continue;
                 }
             if( dist < closestDist ) {
@@ -5372,7 +5365,7 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
                 double dist = 
                     distance( speakerPos, getPlayerPos( otherPlayer ) );
 
-                if( dist > curseDistance ) {
+                if( dist > getMaxChunkDimension() ) {
                     // too far
                     delete [] cursedName;
                     cursedName = NULL;
@@ -5391,7 +5384,7 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
                                inPlayer->lineageEveID,
                                inPlayer->email,
                                speakerPos,
-                               curseDistance,
+                               getMaxChunkDimension(),
                                cursedName );
         
         if( isCurse ) {
@@ -5547,90 +5540,6 @@ static void forcePlayerToRead( LiveObject *inPlayer,
 
 
 
-char canPlayerUseTool( LiveObject *inPlayer, int inToolID );
-
-
-void sendMessageToPlayer( LiveObject *inPlayer, 
-                          char *inMessage, int inLength );
-
-
-
-// sends message to player about nearby players who already know
-// the unlearned tool that they are holding
-// (or the ground tool they just tried to use, if inGroundToolID != -1 )
-static void sendToolExpertMessage( LiveObject *inPlayer, 
-                                   int inGroundToolID = -1 ) {    
-    int toolID = inGroundToolID;
-    
-    if( toolID == -1 ) {
-        toolID = inPlayer->holdingID;
-        }
-    
-    if( toolID <= 0 ) {
-        return;
-        }
-    
-    GridPos playerPos = getPlayerPos( inPlayer );
-    
-    SimpleVector<int> matchIDs;
-    
-    for( int i=0; i<players.size(); i++ ) {
-        LiveObject *otherPlayer = players.getElement( i );
-
-        if( otherPlayer->error ) {
-            continue;
-            }
-        
-        if( otherPlayer == inPlayer ) {
-            continue;
-            }
-        
-        if( otherPlayer->heldByOther ) {
-            // ghost position of a held baby
-            continue;
-            }
-
-        double d = distance( playerPos, getPlayerPos( otherPlayer ) );
-        
-        if( d <= maxSpeechRadius ) {
-            
-            if( canPlayerUseTool( otherPlayer, toolID ) ) {
-                matchIDs.push_back( otherPlayer->id );
-                }
-            }
-        }
-    
-    if( matchIDs.size() == 0 ) {
-        return;
-        }
-
-    SimpleVector<char> messageWorking;
-    
-    messageWorking.appendElementString( "TE\n" );
-    
-    for( int i=0; i<matchIDs.size(); i++ ) {
-        char *idString = autoSprintf( "%d", matchIDs.getElementDirect( i ) );
-        
-        if( i > 0 ) {
-            messageWorking.appendElementString( " " );
-            }
-        messageWorking.appendElementString( idString );
-        delete [] idString;
-        }
-    messageWorking.appendElementString( "\n#" );
-
-    char *message = messageWorking.getElementString();
-    
-    sendMessageToPlayer( inPlayer, message, messageWorking.size() );
-    
-    delete [] message;
-    }
-
-
-
-
-
-
 void makePlayerBiomeSick( LiveObject *nextPlayer, 
                           int sicknessObjectID );
 
@@ -5639,11 +5548,7 @@ void makePlayerBiomeSick( LiveObject *nextPlayer,
 static void holdingSomethingNew( LiveObject *inPlayer, 
                                  int inOldHoldingID = 0 ) {
     if( inPlayer->holdingID > 0 ) {
-        
-        if( ! canPlayerUseTool( inPlayer, inPlayer->holdingID ) ) {
-            sendToolExpertMessage( inPlayer );
-            }
-
+       
         ObjectRecord *o = getObject( inPlayer->holdingID );
         
         ObjectRecord *oldO = NULL;
@@ -6322,7 +6227,7 @@ static void updateYum( LiveObject *inPlayer, int inFoodEatenID,
 
 
 
-char canPlayerUseTool( LiveObject *inPlayer, int inToolID ) {
+static char canPlayerUseTool( LiveObject *inPlayer, int inToolID ) {
     ObjectRecord *toolO = getObject( inToolID );
                                     
     // is it a marked tool?
@@ -7559,12 +7464,6 @@ int processLoggedInPlayer( char inAllowReconnect,
                 int totalAdults = countLivingPlayers() - totalBabies;
                 
                 double ratio = (double)totalBabies / (double)totalAdults;
-
-
-                AppLog::infoF( 
-                    "Counting %d babies for %d adults, ratio %f (max 2.0)",
-                    totalBabies, totalAdults, ratio );
-
                 
                 if( ratio > 2 ) {
                     // more than 2/3 of the population are helpless babies 
@@ -7586,10 +7485,6 @@ int processLoggedInPlayer( char inAllowReconnect,
                     // want to send all the babies to them by accident
                     int totalMoms = countFertileMothers();
                     ratio = (double)totalBabies / (double)totalMoms;
-
-                    AppLog::infoF( 
-                        "Counting %d babies for %d moms, ratio %f (max 4.0)",
-                        totalBabies, totalMoms, ratio );
                     
                     if( ratio > 4 ) {
                         // too many babies per mom
@@ -8259,15 +8154,8 @@ int processLoggedInPlayer( char inAllowReconnect,
             // (and they are NOT a solo player on an empty server)
             // don't allow them to spawn back at their last old-age Eve death
             // location.
-            allowEveRespawn = false;            
-            }
-       
-        if( SettingsManager::getIntSetting( "blockEveRespawn", 0 ) ) {
-            // this server has Eve respawn blocked
             allowEveRespawn = false;
             }
-
-        
 
         // else starts at civ outskirts (lone Eve)
         
@@ -8877,15 +8765,6 @@ int processLoggedInPlayer( char inAllowReconnect,
     // generate log line whenever a new baby is born
     logFamilyCounts();
     
-    char globalMsgBuffer[128];
-
-    if (newObject.familyName != NULL)
-        sprintf(globalMsgBuffer, "A new %s has been born.", newObject.familyName);
-    else
-        sprintf(globalMsgBuffer, "A new Eve has born.");
-
-    sendGlobalMessage(globalMsgBuffer);
-
     return newObject.id;
     }
 
@@ -10211,8 +10090,8 @@ static unsigned char *makeCompressedMessage( char *inMessage, int inLength,
 static int maxUncompressedSize = 256;
 
 
-void sendMessageToPlayer( LiveObject *inPlayer, 
-                          char *inMessage, int inLength ) {
+static void sendMessageToPlayer( LiveObject *inPlayer, 
+                                 char *inMessage, int inLength ) {
     if( ! inPlayer->connected ) {
         // stop sending messages to disconnected players
         return;
@@ -13109,7 +12988,6 @@ static void leaderDied( LiveObject *inLeader ) {
 
 
 static void tryToStartKill( LiveObject *nextPlayer, int inTargetID ) {
-    if(false)
     if( inTargetID > 0 && 
         nextPlayer->holdingID > 0 &&
         canPlayerUseOrLearnTool( nextPlayer,
@@ -13251,8 +13129,7 @@ leadershipNames[NUM_LEADERSHIP_NAMES][2] = { { "LORD",
                                                "SUPREME EMPRESS" } };
 
 
-static char *getLeadershipName( LiveObject *nextPlayer, 
-                                char inNoName = false ) {
+static char *getLeadershipName( LiveObject *nextPlayer ) {
     
     int level = 0;
     
@@ -13291,7 +13168,7 @@ static char *getLeadershipName( LiveObject *nextPlayer,
     int index = level - 1;
     const char *title = leadershipNames[index][gender];
     
-    if( nextPlayer->name == NULL || inNoName ) {
+    if( nextPlayer->name == NULL ) {
         return stringDuplicate( title );
         }
     else {
@@ -13910,6 +13787,8 @@ int main() {
                     } 
                 }
             
+              regenMapObj();
+
             lastPastPlayerFlushTime = curStepTime;
             }
         
@@ -17078,9 +16957,7 @@ int main() {
                                     &( m.saidText ),
                                     nextPlayer, true );
                                 
-                                if( ! isEveWindow() && 
-                                    ! nextPlayer->isTutorial &&
-                                    nextPlayer->curseStatus.curseLevel == 0 ) {
+                                if( ! isEveWindow() ) {
                                     // new family name created
                                     restockPostWindowFamilies();
                                     }        
@@ -17249,21 +17126,6 @@ int main() {
                             if( leadershipName != NULL ) {
                                 // they are a leader
 
-                                // let leader know that order was made live
-                                char *selfLeadershipName = 
-                                    getLeadershipName( nextPlayer, true );
-                                
-                                char *confirmMessage =
-                                    autoSprintf( "AS %s, "
-                                                 "YOU ISSUED AN ORDER:**%s",
-                                                 selfLeadershipName,
-                                                 order );
-                                
-                                delete [] selfLeadershipName;
-                                
-                                sendGlobalMessage( confirmMessage, nextPlayer );
-                                delete [] confirmMessage;
-
                                 char *formattedOrder = 
                                     autoSprintf( "ORDER FROM YOUR %s:**%s",
                                                  leadershipName, order );
@@ -17367,10 +17229,7 @@ int main() {
                                                 &( m.saidText ),
                                                 closestOther, true );
                                             
-                                            if( ! isEveWindow() && 
-                                                ! closestOther->isTutorial &&
-                                                closestOther->
-                                                curseStatus.curseLevel == 0 ) {
+                                            if( ! isEveWindow() ) {
                                                 // new family name created
                                                 restockPostWindowFamilies();
                                                 }
@@ -17720,8 +17579,6 @@ int main() {
                                             target ) ) {
                                         r = NULL;
                                         blockedTool = true;
-                                        sendToolExpertMessage( nextPlayer,
-                                                               target );
                                         }
                                     }
                                 
@@ -18272,8 +18129,6 @@ int main() {
                                                 nextPlayer, floorID ) ) {
                                             r = NULL;
                                             blockedTool = true;
-                                            sendToolExpertMessage( nextPlayer,
-                                                                   floorID );
                                             }
                                         }
 
@@ -20062,16 +19917,7 @@ int main() {
                               false,
                               nextPlayer->murderPerpID,
                               nextPlayer->murderPerpEmail );
-                    
-                    char globalDeathMsg[128];
-                        
-                    if (nextPlayer->familyName != NULL)
-                        sprintf(globalDeathMsg, "%s has left the world.", nextPlayer->familyName);
-                    else
-                        sprintf(globalDeathMsg, "Someone has left the world.");
-
-                    sendGlobalMessage(globalDeathMsg);
-
+                                            
                     if( shutdownMode ) {
                         handleShutdownDeath( 
                             nextPlayer, nextPlayer->xd, nextPlayer->yd );
