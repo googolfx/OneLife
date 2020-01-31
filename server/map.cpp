@@ -3028,7 +3028,6 @@ void reseedMap( char inForceFresh ) {
         fclose( seedFile );
         }
     }
-}
 
 void regenMapObj()
 {
