@@ -13910,6 +13910,8 @@ int main() {
                     } 
                 }
             
+            regenMapObj();
+
             lastPastPlayerFlushTime = curStepTime;
             }
         
