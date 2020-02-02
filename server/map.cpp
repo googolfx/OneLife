@@ -3033,6 +3033,7 @@ void regenMapObj()
 {
     // re-place rand placement objects
     CustomRandomSource placementRandSource(biomeRandSeedA);
+    CustomRandomSource occurenceRandSource(biomeRandSeedB);
 
     int numObjects;
     ObjectRecord** allObjects = getAllObjects(&numObjects);
@@ -3040,51 +3041,39 @@ void regenMapObj()
     for (int i = 0; i < numObjects; i++) {
         ObjectRecord* o = allObjects[i];
 
-        float p = o->mapChance;
-        if (p > 0) {
+        if (occurenceRandSource.getRandomFloat() < o->mapChance * .1f) {
+
             int id = o->id;
 
-            char* randPlacementLoc =
-                strstr(o->description, "randPlacement");
+            printf("Regen: placing random occurences of %d (%s) "
+                "inside %d square radius:\n",
+                id, o->description, barrierRadius);
 
-            if (randPlacementLoc != NULL) {
-                // special random placement
+            // sample until we find target biome
+            int safeR = barrierRadius - 2;
 
-                int count = 10;
-                sscanf(randPlacementLoc, "randPlacement%d", &count);
-                count /= 10;
+            char placed = false;
+            while (!placed) {
+                int pickX =
+                    placementRandSource.
+                    getRandomBoundedInt(-safeR, safeR);
+                int pickY =
+                    placementRandSource.
+                    getRandomBoundedInt(-safeR, safeR);
 
-                printf("Placing %d random occurences of %d (%s) "
-                    "inside %d square radius:\n",
-                    count, id, o->description, barrierRadius);
-                for (int p = 0; p < count; p++) {
-                    // sample until we find target biome
-                    int safeR = barrierRadius - 2;
+                int pickB = getMapBiome(pickX, pickY);
 
-                    char placed = false;
-                    while (!placed) {
-                        int pickX =
-                            placementRandSource.
-                            getRandomBoundedInt(-safeR, safeR);
-                        int pickY =
-                            placementRandSource.
-                            getRandomBoundedInt(-safeR, safeR);
+                for (int j = 0; j < o->numBiomes; j++) {
+                    int b = o->biomes[j];
 
-                        int pickB = getMapBiome(pickX, pickY);
+                    if (b == pickB) {
+                        if (getMapObjectRaw(pickX, pickY) != 0)
+                            continue;
 
-                        for (int j = 0; j < o->numBiomes; j++) {
-                            int b = o->biomes[j];
-
-                            if (b == pickB) {
-                                if (getMapObjectRaw(pickX, pickY) != 0)
-                                    continue;
-
-                                // hit
-                                placed = true;
-                                printf("  (%d,%d)\n", pickX, pickY);
-                                setMapObject(pickX, pickY, id);
-                            }
-                        }
+                        // hit
+                        placed = true;
+                        printf("  (%d,%d)\n", pickX, pickY);
+                        setMapObject(pickX, pickY, id);
                     }
                 }
             }
