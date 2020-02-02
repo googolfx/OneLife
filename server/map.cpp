@@ -3052,8 +3052,8 @@ void regenMapObj()
             // sample until we find target biome
             int safeR = barrierRadius - 2;
 
-            char placed = false;
-            while (!placed) {
+            //char placed = false;
+            //while (!placed) {
                 int pickX =
                     placementRandSource.
                     getRandomBoundedInt(-safeR, safeR);
@@ -3070,13 +3070,13 @@ void regenMapObj()
                         if (getMapObjectRaw(pickX, pickY) != 0)
                             continue;
 
-                        // hit
-                        placed = true;
+                        //// hit
+                        //placed = true;
                         printf("  (%d,%d)\n", pickX, pickY);
                         setMapObject(pickX, pickY, id);
                     }
                 }
-            }
+            //}
         }
     }
     delete[] allObjects;
