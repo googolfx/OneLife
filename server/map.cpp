@@ -3041,6 +3041,9 @@ void regenMapObj()
     for (int i = 0; i < numObjects; i++) {
         ObjectRecord* o = allObjects[i];
 
+        if (o->deadlyDistance > 0)
+            continue;
+
         if (occurenceRandSource.getRandomFloat() < o->mapChance) {
 
             int id = o->id;
