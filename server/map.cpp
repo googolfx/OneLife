@@ -3041,12 +3041,16 @@ void regenMapObj()
     for (int i = 0; i < numObjects; i++) {
         ObjectRecord* o = allObjects[i];
 
-        if (o->deadlyDistance > 0)
-            continue;
+        //if (o->deadlyDistance > 0)
+        //    continue;
 
-        if (occurenceRandSource.getRandomFloat() < o->mapChance) {
+        if (occurenceRandSource.getRandomFloat() < o->mapChance / 2) {
 
             int id = o->id;
+
+            if (id == 630 || // Bear Cave
+                id == 2156) // Mosquito Swarm
+                continue;
 
             printf("Regen: placing random occurences of %d (%s) "
                 "inside %d square radius:\n",
