@@ -13170,12 +13170,16 @@ static void leaderDied( LiveObject *inLeader ) {
 
 
 static void tryToStartKill( LiveObject *nextPlayer, int inTargetID ) {
-    if(false)
     if( inTargetID > 0 && 
         nextPlayer->holdingID > 0 &&
         canPlayerUseOrLearnTool( nextPlayer,
                                  nextPlayer->holdingID ) ) {
-                            
+
+		if(nextPlayer->holdingID == 560 || // Knife
+			nextPlayer->holdingID == 152 || // Bow and Arrow
+			nextPlayer->holdingID == 1624 ) // Bow and Arrow with Note
+			return;
+		
         ObjectRecord *heldObj = 
             getObject( nextPlayer->holdingID );
                             
