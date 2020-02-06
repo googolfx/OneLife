@@ -7,6 +7,31 @@ NOTE:
 As part of this week's update process, check bigserver2 logs post-restart as
 part of:  https://github.com/jasonrohrer/OneLife/issues/510
 
+Check again after the next update (v309)
+
+
+
+
+Version 309   ???
+
+--Fixed incorrect path start when path finding fails and retries.  Fixes #525
+
+--When a new offspring baby is born (other than your own), your character
+  exclaims the situation verbally (only you can see the exclamation) and a
+  60-second map-style pointer is created to the offspring baby.  Part of #523
+
+--When a new offspring baby is born, all of your existing family members have
+  +FAMILY+ above their heads as a reminder of who affects your gene score.
+  Part of #523
+
+--Saying /FAM command produces +FAMILY+ reminders above the heads of genetic
+  family members.  Part of #523
+
+--Pause screen (hit ESC) has full list of chat commands.
+
+--Support for ~~ to indicate half-line skip in multi-line on-screen messages.
+  Using this for command list spacing.
+
 
 
 Version 307   2020-January-30

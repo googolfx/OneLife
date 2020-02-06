@@ -7106,6 +7106,32 @@ char getForceSpawn( char *inEmail, ForceSpawnRecord *outRecordToFill ) {
 
 
 
+static void makeOffspringSayMarker( int inPlayerID, int inIDToSkip ) {
+    
+    LiveObject *playerO = getLiveObject( inPlayerID );
+    
+    for( int i=0; i<players.size(); i++ ) {
+        LiveObject *o = players.getElement( i );
+        
+        if( o->id != inPlayerID && o->id != inIDToSkip ) {
+            
+            if( o->ancestorIDs->getElementIndex( inPlayerID ) != -1 ) {
+                // this player is an ancestor of this other
+                
+                // make other say ++, but only so this player can hear it
+
+                char *message = autoSprintf( "PS\n"
+                                             "%d/0 +FAMILY+\n#",
+                                             o->id );
+                sendMessageToPlayer( playerO, message, strlen( message ) );
+                delete [] message;
+                }
+            }
+        }
+    }
+
+
+
 
 
 // for placement of tutorials out of the way 
@@ -8876,6 +8902,41 @@ int processLoggedInPlayer( char inAllowReconnect,
 
     // generate log line whenever a new baby is born
     logFamilyCounts();
+
+
+    // tell non-mother ancestors about this baby
+    for( int i=0; i<newObject.ancestorIDs->size(); i++ ) {
+        int id = newObject.ancestorIDs->getElementDirect( i );
+        
+        if( id == newObject.id ) {
+            continue;
+            }
+        
+        // skip this baby when saying ++
+        // we are already getting a pointer to them, probably
+        makeOffspringSayMarker( id, newObject.id );
+        
+
+        if( id == newObject.parentID ) {
+            continue;
+            }
+        
+        LiveObject *o = getLiveObject( id );
+        
+        if( o != NULL && ! o->error && o->connected ) {
+            
+            char *message = autoSprintf( "PS\n"
+                                         "%d/0 A NEW OFFSPRING BABY "
+                                         "*baby %d *map %d %d\n#",
+                                         id,
+                                         newObject.id,
+                                         newObject.xs - o->birthPos.x,
+                                         newObject.ys - o->birthPos.y );
+            sendMessageToPlayer( o, message, strlen( message ) );
+            delete [] message;
+            }
+        }
+
     
     char globalMsgBuffer[128];
 

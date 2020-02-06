@@ -413,6 +413,10 @@ and " AND"
 
 metersAway "METERS AWAY"
 
+map "MAP"
+baby "BABY"
+
+
 
 atWar "AT WAR"
 
@@ -450,6 +454,8 @@ netCommand "/NET"
 pingCommand "/PING"
 
 disconnectCommand "/DISCONNECT"
+
+familyCommand "/FAM"
 
 
 
@@ -693,6 +699,14 @@ pauseMessage3 "PRESS [%] TO QUIT"
 pauseMessage3b "YOU CAN'T QUIT NOW"
 
 pauseMessage4 "-"
+
+
+
+commandHintsA "CHAT COMMANDS:####/FAM##/DIE##/DISCONNECT##/FPS##/NET##/PING##/HAPPY##/MAD##/ANGRY##/SAD##/DEVIOUS##/JOY##/BLUSH##/HUBBA##/ILL##/YOOHOO##/HMPH##/LOVE##/OREALLY##/SHOCK"
+
+
+commandHintsB "MORE COMMANDS:####I AM [NAME]##YOU ARE [NAME]##CURSE [NAME]##[NAME] OWNS THIS##I'LL KILL [NAME]##I JOIN YOU##I FOLLOW [NAME]##I EXILE [NAME]##I REDEEM [NAME]##ORDER, [TEXT]######NOTE:####[NAME] CAN BE##'YOU' FOR CLOSEST##PERSON, AS IN##'CURSE YOU'"
+
 
 
 

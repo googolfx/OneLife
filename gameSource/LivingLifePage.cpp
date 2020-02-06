@@ -228,6 +228,10 @@ static SimpleVector<GridPos> graveRequestPos;
 static SimpleVector<GridPos> ownerRequestPos;
 
 
+// IDs of pointed-to offspring that don't exist yet
+static SimpleVector<int> ourUnmarkedOffspring;
+
+
 
 static char showPing = false;
 static double pingSentTime = -1;
@@ -269,6 +273,8 @@ typedef struct {
         GridPos pos;
         char ancient;
         char temporary;
+        char tempBaby;
+        int babyID;
         // 0 if not set
         double temporaryExpireETA;
     } HomePos;
@@ -314,7 +320,8 @@ static HomePos *getHomePosRecord() {
 
 // returns pointer to record, NOT destroyed by caller, or NULL if 
 // home unknown
-static  GridPos *getHomeLocation( char *outTemp, char inAncient ) {
+static  GridPos *getHomeLocation( char *outTemp, char *outTempBaby,
+                                  char inAncient ) {
     *outTemp = false;
     
     if( inAncient ) {
@@ -335,7 +342,7 @@ static  GridPos *getHomeLocation( char *outTemp, char inAncient ) {
     // don't consider ancient marker here, if it's the only one
     if( r != NULL && ! r->ancient ) {
         *outTemp = r->temporary;
-
+        *outTempBaby = r->tempBaby;
         return &( r->pos );
         }
     else {
@@ -384,7 +391,8 @@ static void addHomeLocation( int inX, int inY ) {
 
 
 
-static void addTempHomeLocation( int inX, int inY ) {
+static void addTempHomeLocation( int inX, int inY, 
+                                 char inBaby, int inBabyID ) {
     removeAllTempHomeLocations();
     
     GridPos newPos = { inX, inY };
@@ -396,7 +404,30 @@ static void addTempHomeLocation( int inX, int inY ) {
     // until we drop the map
     p.temporaryExpireETA = 0;
     
+    p.tempBaby = inBaby;
+
+    p.babyID = -1;
+    
+    if( inBaby ) {
+        // baby pointer does not depend on held map
+        p.temporaryExpireETA = game_getCurrentTime() + 60;
+        p.babyID = inBabyID;
+        }
+
     homePosStack.push_back( p );
+    }
+
+
+
+static void updateBabyHomeLocation( int inBabyID, int inX, int inY ) {
+    for( int i=0; i<homePosStack.size(); i++ ) {
+        HomePos *p = homePosStack.getElement( i );
+        
+        if( p->tempBaby && p->babyID == inBabyID ) {
+            p->pos.x = inX;
+            p->pos.y = inY;
+            }
+        }
     }
 
 
@@ -433,11 +464,14 @@ static int getHomeDir( doublePair inCurrentPlayerPos,
                        double *outTileDistance = NULL,
                        char *outTooClose = NULL,
                        char *outTemp = NULL,
+                       char *outTempBaby = NULL,
                        // 1 for ancient marker
                        int inIndex = 0 ) {
     char temporary = false;
     
-    GridPos *p = getHomeLocation( &temporary, ( inIndex == 1 ) );
+    char tempBaby = false;
+
+    GridPos *p = getHomeLocation( &temporary, &tempBaby, ( inIndex == 1 ) );
     
     if( p == NULL ) {
         return -1;
@@ -445,6 +479,9 @@ static int getHomeDir( doublePair inCurrentPlayerPos,
     
     if( outTemp != NULL ) {
         *outTemp = temporary;
+        }
+    if( outTempBaby != NULL ) {
+        *outTempBaby = tempBaby;
         }
     
     if( outTooClose != NULL ) {
@@ -1784,7 +1821,7 @@ static int pathFindingD = 32;
 static char isAutoClick = false;
 
 
-void LivingLifePage::computePathToDest( LiveObject *inObject ) {
+static void findClosestPathSpot( LiveObject *inObject ) {
     
     GridPos start;
     start.x = lrint( inObject->currentPos.x );
@@ -1828,6 +1865,16 @@ void LivingLifePage::computePathToDest( LiveObject *inObject ) {
         start.x = inObject->xServer;
         start.y = inObject->yServer;
         }
+    
+    inObject->closestPathPos = start;
+    }
+
+
+
+
+void LivingLifePage::computePathToDest( LiveObject *inObject ) {
+    
+    GridPos start = inObject->closestPathPos;
     
     
     int startInd = getMapIndex( start.x, start.y );
@@ -5622,6 +5669,7 @@ char *getSpokenNumber( unsigned int inNumber, int inSigFigs = 2 ) {
 
 
 static char mapHintEverDrawn[2] = { false, false };
+static char babyHintEverDrawn[2] = { false, false };
 
 
 
@@ -5648,9 +5696,11 @@ void LivingLifePage::drawHomeSlip( doublePair inSlipPos, int inIndex ) {
         double homeDist = 0;
         char tooClose = false;
         char temporary = false;
-            
+        char tempBaby = false;
+        
         int arrowIndex = getHomeDir( ourLiveObject->currentPos, &homeDist,
-                                     &tooClose, &temporary, inIndex );
+                                     &tooClose, &temporary, 
+                                     &tempBaby, inIndex );
             
         if( arrowIndex == -1 || 
             ! mHomeArrowStates[inIndex][arrowIndex].solid ) {
@@ -5742,8 +5792,19 @@ void LivingLifePage::drawHomeSlip( doublePair inSlipPos, int inIndex ) {
             else {
                 distPos.y -= 20;
                 }
-            mapHintEverDrawn[inIndex] = true;
-            pencilFont->drawString( "MAP", mapHintPos, alignCenter );
+            
+            if( tempBaby ) {
+                babyHintEverDrawn[inIndex] = true;
+                mapHintEverDrawn[inIndex] = false;
+                pencilFont->drawString( translate( "baby" ), 
+                                        mapHintPos, alignCenter );
+                }
+            else {
+                babyHintEverDrawn[inIndex] = false;
+                mapHintEverDrawn[inIndex] = true;
+                pencilFont->drawString( translate( "map" ), 
+                                        mapHintPos, alignCenter );
+                }
             }
         else if( mapHintEverDrawn[inIndex] ) {
             if( inIndex == 0 ) {
@@ -5752,7 +5813,18 @@ void LivingLifePage::drawHomeSlip( doublePair inSlipPos, int inIndex ) {
             else {
                 distPos.y -= 20;
                 }
-            pencilErasedFont->drawString( "MAP", mapHintPos, alignCenter );
+            pencilErasedFont->drawString( translate( "map" ), 
+                                          mapHintPos, alignCenter );
+            }
+        else if( babyHintEverDrawn[inIndex] ) {
+            if( inIndex == 0 ) {
+                distPos.y -= 20;
+                }
+            else {
+                distPos.y -= 20;
+                }
+            pencilErasedFont->drawString( translate( "baby" ), 
+                                          mapHintPos, alignCenter );
             }
             
 
@@ -12167,9 +12239,10 @@ void LivingLifePage::step() {
             char tooClose = false;
             double homeDist = 0;
             char temporary = false;
+            char tempBaby = false;
             
             int homeArrow = getHomeDir( ourObject->currentPos, &homeDist,
-                                        &tooClose, &temporary, j );
+                                        &tooClose, &temporary, &tempBaby, j );
             
             if( ! apocalypseInProgress && homeArrow != -1 && ! tooClose ) {
                 mHomeSlipPosTargetOffset[j].y = 
@@ -12186,7 +12259,8 @@ void LivingLifePage::step() {
                         }
                     }
                 if( temporary || 
-                    ( mapHintEverDrawn[j] && longDistance ) ) {
+                    ( ( babyHintEverDrawn[j] || mapHintEverDrawn[j] ) 
+                      && longDistance ) ) {
                     if( j == 0 ) {
                         mHomeSlipPosTargetOffset[j].y += 20;
                         }
@@ -12281,6 +12355,7 @@ void LivingLifePage::step() {
                     mHomeArrowStates[j][i].fade = 0;
                     }
                 mapHintEverDrawn[j] = false;
+                babyHintEverDrawn[j] = false;
                 
                 // clear old dist strings too
                 mPreviousHomeDistStrings[j].deallocateStringElements();
@@ -15369,6 +15444,8 @@ void LivingLifePage::step() {
                 o.followingUs = false;
                 o.leadershipNameTag = NULL;
                 
+                o.isGeneticFamily = false;
+                
 
                 int forced = 0;
                 int done_moving = 0;
@@ -16804,6 +16881,25 @@ void LivingLifePage::step() {
                         existing->xServer = o.xServer;
                         existing->yServer = o.yServer;
                         
+                        
+                        if( existing->age < 1.0 && 
+                            existing->heldByAdultID == -1 ) {
+                            
+                            updateBabyHomeLocation( 
+                                existing->id,
+                                lrint( existing->currentPos.x ),
+                                lrint( existing->currentPos.y ) );
+                            }
+                        else if( existing->holdingID < 0 ) {
+                            int babyID = - existing->holdingID;
+                            
+                            updateBabyHomeLocation( 
+                                babyID,
+                                lrint( existing->currentPos.x ),
+                                lrint( existing->currentPos.y ) );
+                            }
+                        
+
                         existing->lastSpeed = o.lastSpeed;
                         
                         char babyDropped = false;
@@ -17082,6 +17178,19 @@ void LivingLifePage::step() {
                         
                         o.foodDrainTime = -1;
                         o.indoorBonusTime = 0;
+
+                        
+                        int unmarkedIndex =
+                            ourUnmarkedOffspring.getElementIndex( o.id );
+                        if( unmarkedIndex != -1 ) {
+                            // this new baby was pointed to as our offspring
+                            // before, as they were born
+                            ourUnmarkedOffspring.deleteElement( unmarkedIndex );
+                            
+                            o.isGeneticFamily = true;
+                            }
+                        
+
                         
                         ObjectRecord *obj = getObject( o.displayID );
                         
@@ -17592,6 +17701,23 @@ void LivingLifePage::step() {
                             // range anymore
                             existing->outOfRange = false;
                             
+                            
+                            if( existing->age < 1.0 && 
+                                existing->heldByAdultID == -1 ) {
+                                
+                                updateBabyHomeLocation( 
+                                    existing->id,
+                                    lrint( existing->currentPos.x ),
+                                    lrint( existing->currentPos.y ) );
+                                }
+                            else if( existing->holdingID < 0 ) {
+                                int babyID = - existing->holdingID;
+                                
+                                updateBabyHomeLocation( 
+                                    babyID,
+                                    lrint( existing->currentPos.x ),
+                                    lrint( existing->currentPos.y ) );
+                                }
 
 
                             double timePassed = 
@@ -17782,8 +17908,11 @@ void LivingLifePage::step() {
                                         // where we are
                                         
                                         printf( "    CUR PATH:  " );
-                                        printPath( oldPath.getElementArray(), 
+                                        GridPos *oldPathArray = 
+                                            oldPath.getElementArray();
+                                        printPath( oldPathArray,
                                                    oldPathLength );
+                                        delete [] oldPathArray;
                                         printf( "    WE AT:  %d (%d,%d)  \n",
                                                 oldCurrentPathIndex,
                                                 oldCurrentPathPos.x,
@@ -18128,6 +18257,11 @@ void LivingLifePage::step() {
                                 existing->currentSpeech = 
                                     stringDuplicate( &( firstSpace[1] ) );
                                 
+                                if( strcmp( existing->currentSpeech, 
+                                            "+FAMILY+" ) == 0 ) {
+                                    existing->isGeneticFamily = true;
+                                    }
+
                                 existing->speechFade = 1.0;
                                 
                                 existing->speechIsSuccessfulCurse = curseFlag;
@@ -18169,13 +18303,47 @@ void LivingLifePage::step() {
                                         int numRead = sscanf( starPos,
                                                               " *map %d %d",
                                                               &mapX, &mapY );
-                                        if( numRead == 2 ) {
-                                            addTempHomeLocation( mapX, mapY );
-                                            }
-
                                         // trim it off
                                         starPos[0] ='\0';
 
+                                        char baby = false;
+                                        
+                                        char *babyPos = 
+                                            strstr( existing->currentSpeech, 
+                                                    " *baby" );
+                                        
+                                        int babyID = -1;
+
+                                        if( babyPos != NULL ) {
+                                            baby = true;
+
+                                            sscanf( babyPos, 
+                                                    " *baby %d", &babyID );
+
+                                            babyPos[0] = '\0';
+                                            }
+
+
+                                        if( numRead == 2 ) {
+                                            addTempHomeLocation( mapX, mapY,
+                                                                 baby,
+                                                                 babyID );
+                                            }
+
+                                        if( babyID != -1 ) {
+                                            LiveObject *babyO =
+                                                getLiveObject( babyID );
+                                            if( babyO != NULL ) {
+                                                babyO->isGeneticFamily = true;
+                                                }
+                                            else {
+                                                // baby creation message
+                                                // not received yet
+                                                ourUnmarkedOffspring.push_back(
+                                                    babyID );
+                                                }
+                                            }
+                                        
                                         doublePair dest = { (double)mapX, 
                                                             (double)mapY };
                                         double d = 
@@ -18469,7 +18637,34 @@ void LivingLifePage::step() {
                                         }
                                     }
                                 
+                                if( id == ourID ) {
+                                    // we just got our own lineage
+                                    for( int t=0; 
+                                         t < existing->lineage.size();
+                                         t++ ) {
+                                        LiveObject *ancestor =
+                                            getLiveObject( 
+                                                existing->lineage.
+                                                getElementDirect( t ) );
 
+                                        if( ancestor != NULL ) {
+                                            ancestor->isGeneticFamily = true;
+                                            }
+                                        }
+                                    }
+                                else {
+                                    // are we an ancestor of this person?
+                                    for( int t=0; 
+                                         t < existing->lineage.size();
+                                         t++ ) {
+                                        if( ourID == 
+                                            existing->
+                                            lineage.getElementDirect( t ) ) {
+                                            existing->isGeneticFamily = true;
+                                            break;
+                                            }
+                                        }
+                                    }
                                 
                                 tokens->deallocateStringElements();
                                 delete tokens;
@@ -20506,11 +20701,14 @@ void LivingLifePage::makeActive( char inFresh ) {
     if( !inFresh ) {
         return;
         }
+
+    ourUnmarkedOffspring.deleteAll();
     
     clearToolLearnedStatus();
 
     for( int j=0; j<2; j++ ) {
         mapHintEverDrawn[j] = false;
+        babyHintEverDrawn[j] = false;
         }
 
     mOldHintArrows.deleteAll();
@@ -21761,6 +21959,11 @@ void LivingLifePage::pointerDown( float inX, float inY ) {
 
         return;
         }
+    
+
+    // prepare for various calls to computePathToDest below
+    findClosestPathSpot( ourLiveObject );
+    
     
 
     // consider 3x4 area around click and test true object pixel
@@ -23616,6 +23819,32 @@ void LivingLifePage::keyDown( unsigned char inASCII ) {
                                              translate( "disconnectCommand" ) ) 
                                      == typedText ) {
                                 forceDisconnect = true;
+                                }
+                            else if( strstr( typedText,
+                                             translate( "familyCommand" ) ) 
+                                     == typedText ) {
+                                double curTime = game_getCurrentTime();
+                                for( int f=0; f<gameObjects.size(); f++ ) {
+                                    
+                                    LiveObject *famO = 
+                                        gameObjects.getElement( f );
+                                    if( famO->isGeneticFamily ) {
+                                        if( famO->currentSpeech != NULL ) {
+                                            delete [] famO->currentSpeech;
+                                            famO->currentSpeech = NULL;
+                                            }
+                                        
+                                        famO->currentSpeech = 
+                                            stringDuplicate( "+FAMILY+" );
+                                        famO->speechFade = 1.0;
+                                
+                                        famO->speechIsSuccessfulCurse = false;
+
+                                        famO->speechFadeETATime =
+                                            curTime + 3 +
+                                            strlen( famO->currentSpeech ) / 5;
+                                        }
+                                    }
                                 }
                             else {
                                 // filter hints
