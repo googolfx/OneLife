@@ -273,8 +273,9 @@ typedef struct {
         GridPos pos;
         char ancient;
         char temporary;
-        char tempBaby;
-        int babyID;
+        char tempPerson;
+        int personID;
+        const char *tempPersonKey;
         // 0 if not set
         double temporaryExpireETA;
     } HomePos;
@@ -320,7 +321,8 @@ static HomePos *getHomePosRecord() {
 
 // returns pointer to record, NOT destroyed by caller, or NULL if 
 // home unknown
-static  GridPos *getHomeLocation( char *outTemp, char *outTempBaby,
+static  GridPos *getHomeLocation( char *outTemp, char *outTempPerson,
+                                  const char **outTempPersonKey,
                                   char inAncient ) {
     *outTemp = false;
     
@@ -342,7 +344,8 @@ static  GridPos *getHomeLocation( char *outTemp, char *outTempBaby,
     // don't consider ancient marker here, if it's the only one
     if( r != NULL && ! r->ancient ) {
         *outTemp = r->temporary;
-        *outTempBaby = r->tempBaby;
+        *outTempPerson = r->tempPerson;
+        *outTempPersonKey = r->tempPersonKey;
         return &( r->pos );
         }
     else {
@@ -392,7 +395,8 @@ static void addHomeLocation( int inX, int inY ) {
 
 
 static void addTempHomeLocation( int inX, int inY, 
-                                 char inBaby, int inBabyID ) {
+                                 char inPerson, int inPersonID,
+                                 const char *inPersonKey ) {
     removeAllTempHomeLocations();
     
     GridPos newPos = { inX, inY };
@@ -404,14 +408,17 @@ static void addTempHomeLocation( int inX, int inY,
     // until we drop the map
     p.temporaryExpireETA = 0;
     
-    p.tempBaby = inBaby;
+    p.tempPerson = inPerson;
 
-    p.babyID = -1;
+    p.personID = -1;
     
-    if( inBaby ) {
-        // baby pointer does not depend on held map
+    p.tempPersonKey = NULL;
+
+    if( inPerson ) {
+        // person pointer does not depend on held map
         p.temporaryExpireETA = game_getCurrentTime() + 60;
-        p.babyID = inBabyID;
+        p.personID = inPersonID;
+        p.tempPersonKey = inPersonKey;
         }
 
     homePosStack.push_back( p );
@@ -419,11 +426,11 @@ static void addTempHomeLocation( int inX, int inY,
 
 
 
-static void updateBabyHomeLocation( int inBabyID, int inX, int inY ) {
+static void updatePersonHomeLocation( int inPersonID, int inX, int inY ) {
     for( int i=0; i<homePosStack.size(); i++ ) {
         HomePos *p = homePosStack.getElement( i );
         
-        if( p->tempBaby && p->babyID == inBabyID ) {
+        if( p->tempPerson && p->personID == inPersonID ) {
             p->pos.x = inX;
             p->pos.y = inY;
             }
@@ -464,14 +471,17 @@ static int getHomeDir( doublePair inCurrentPlayerPos,
                        double *outTileDistance = NULL,
                        char *outTooClose = NULL,
                        char *outTemp = NULL,
-                       char *outTempBaby = NULL,
+                       char *outTempPerson = NULL,
+                       const char **outTempPersonKey = NULL,
                        // 1 for ancient marker
                        int inIndex = 0 ) {
     char temporary = false;
     
-    char tempBaby = false;
-
-    GridPos *p = getHomeLocation( &temporary, &tempBaby, ( inIndex == 1 ) );
+    char tempPerson = false;
+    const char *tempPersonKey;
+    
+    GridPos *p = getHomeLocation( &temporary, &tempPerson, &tempPersonKey,
+                                  ( inIndex == 1 ) );
     
     if( p == NULL ) {
         return -1;
@@ -480,12 +490,16 @@ static int getHomeDir( doublePair inCurrentPlayerPos,
     if( outTemp != NULL ) {
         *outTemp = temporary;
         }
-    if( outTempBaby != NULL ) {
-        *outTempBaby = tempBaby;
+    if( outTempPerson != NULL ) {
+        *outTempPerson = tempPerson;
         }
     
     if( outTooClose != NULL ) {
         *outTooClose = false;
+        }
+    
+    if( outTempPersonKey != NULL ) {
+        *outTempPersonKey = tempPersonKey;
         }
     
 
@@ -3558,6 +3572,8 @@ typedef struct OffScreenSound {
 
         char red;
         
+        char specialChar;
+        
         int sourcePlayerID;
     } OffScreenSound;
 
@@ -3572,6 +3588,7 @@ static void addOffScreenSound( int inSourcePlayerID,
                                double inFadeSec = 4 ) {
 
     char red = false;
+    char specialChar = 0;
     
     char *stringPos = strstr( inDescription, "offScreenSound" );
     
@@ -3582,13 +3599,21 @@ static void addOffScreenSound( int inSourcePlayerID,
             // _red flag next
             red = true;
             }
+        else {
+            char *underscorePos = strstr( stringPos, "_" );
+            
+            if( underscorePos != NULL && strlen( underscorePos ) >= 2 ) {
+                specialChar = underscorePos[1];
+                }
+            }
         }
     
     double fadeETATime = game_getCurrentTime() + inFadeSec;
     
     doublePair pos = { inPosX, inPosY };
     
-    OffScreenSound s = { pos, 1.0, fadeETATime, red, inSourcePlayerID };
+    OffScreenSound s = { pos, 1.0, fadeETATime, red, 
+                         specialChar, inSourcePlayerID };
     
     offScreenSounds.push_back( s );
     }
@@ -3677,6 +3702,12 @@ void LivingLifePage::drawOffScreenSounds() {
                     }
                 }
             
+            char *strToDelete = NULL;
+            if( s->specialChar > 0 ) {
+                stringToDraw = autoSprintf( "%c", s->specialChar );
+                strToDelete = (char*)stringToDraw;
+                }
+            
 
             drawChalkBackgroundString( drawPos,
                                        stringToDraw,
@@ -3685,6 +3716,10 @@ void LivingLifePage::drawOffScreenSounds() {
                                        NULL,
                                        -1,
                                        bgColor, textColor );
+            
+            if( strToDelete != NULL ) {
+                delete [] strToDelete;
+                }
             }    
         }
     }
@@ -5669,7 +5704,8 @@ char *getSpokenNumber( unsigned int inNumber, int inSigFigs = 2 ) {
 
 
 static char mapHintEverDrawn[2] = { false, false };
-static char babyHintEverDrawn[2] = { false, false };
+static char personHintEverDrawn[2] = { false, false };
+static const char *personHintEverDrawnKey[2] = { "", "" };
 
 
 
@@ -5696,11 +5732,12 @@ void LivingLifePage::drawHomeSlip( doublePair inSlipPos, int inIndex ) {
         double homeDist = 0;
         char tooClose = false;
         char temporary = false;
-        char tempBaby = false;
+        char tempPerson = false;
+        const char *tempPersonKey = NULL;
         
         int arrowIndex = getHomeDir( ourLiveObject->currentPos, &homeDist,
                                      &tooClose, &temporary, 
-                                     &tempBaby, inIndex );
+                                     &tempPerson, &tempPersonKey, inIndex );
             
         if( arrowIndex == -1 || 
             ! mHomeArrowStates[inIndex][arrowIndex].solid ) {
@@ -5793,38 +5830,52 @@ void LivingLifePage::drawHomeSlip( doublePair inSlipPos, int inIndex ) {
                 distPos.y -= 20;
                 }
             
-            if( tempBaby ) {
-                babyHintEverDrawn[inIndex] = true;
-                mapHintEverDrawn[inIndex] = false;
-                pencilFont->drawString( translate( "baby" ), 
+            if( tempPerson ) {
+                personHintEverDrawn[inIndex] = true;
+                personHintEverDrawnKey[inIndex] = tempPersonKey;
+                
+                pencilFont->drawString( translate( tempPersonKey ), 
                                         mapHintPos, alignCenter );
+
+                if( mapHintEverDrawn[inIndex] ) {
+                    pencilErasedFont->drawString( translate( "map" ), 
+                                              mapHintPos, alignCenter );
+                    }
                 }
             else {
-                babyHintEverDrawn[inIndex] = false;
                 mapHintEverDrawn[inIndex] = true;
                 pencilFont->drawString( translate( "map" ), 
                                         mapHintPos, alignCenter );
+                
+                if( personHintEverDrawn[inIndex] ) {
+                    pencilErasedFont->drawString( 
+                        translate( personHintEverDrawnKey[inIndex] ), 
+                        mapHintPos, alignCenter );
+                    }
                 }
             }
-        else if( mapHintEverDrawn[inIndex] ) {
-            if( inIndex == 0 ) {
-                distPos.y -= 20;
+        else {
+            if( mapHintEverDrawn[inIndex] ) {
+                if( inIndex == 0 ) {
+                    distPos.y -= 20;
+                    }
+                else {
+                    distPos.y -= 20;
+                    }
+                pencilErasedFont->drawString( translate( "map" ), 
+                                              mapHintPos, alignCenter );
                 }
-            else {
-                distPos.y -= 20;
+            if( personHintEverDrawn[inIndex] ) {
+                if( inIndex == 0 ) {
+                    distPos.y -= 20;
+                    }
+                else {
+                    distPos.y -= 20;
+                    }
+                pencilErasedFont->drawString( 
+                    translate( personHintEverDrawnKey[inIndex] ), 
+                    mapHintPos, alignCenter );
                 }
-            pencilErasedFont->drawString( translate( "map" ), 
-                                          mapHintPos, alignCenter );
-            }
-        else if( babyHintEverDrawn[inIndex] ) {
-            if( inIndex == 0 ) {
-                distPos.y -= 20;
-                }
-            else {
-                distPos.y -= 20;
-                }
-            pencilErasedFont->drawString( translate( "baby" ), 
-                                          mapHintPos, alignCenter );
             }
             
 
@@ -12239,10 +12290,12 @@ void LivingLifePage::step() {
             char tooClose = false;
             double homeDist = 0;
             char temporary = false;
-            char tempBaby = false;
+            char tempPerson = false;
+            const char *tempPersonKey = NULL;
             
             int homeArrow = getHomeDir( ourObject->currentPos, &homeDist,
-                                        &tooClose, &temporary, &tempBaby, j );
+                                        &tooClose, &temporary, &tempPerson, 
+                                        &tempPersonKey, j );
             
             if( ! apocalypseInProgress && homeArrow != -1 && ! tooClose ) {
                 mHomeSlipPosTargetOffset[j].y = 
@@ -12259,7 +12312,7 @@ void LivingLifePage::step() {
                         }
                     }
                 if( temporary || 
-                    ( ( babyHintEverDrawn[j] || mapHintEverDrawn[j] ) 
+                    ( ( personHintEverDrawn[j] || mapHintEverDrawn[j] ) 
                       && longDistance ) ) {
                     if( j == 0 ) {
                         mHomeSlipPosTargetOffset[j].y += 20;
@@ -12355,7 +12408,7 @@ void LivingLifePage::step() {
                     mHomeArrowStates[j][i].fade = 0;
                     }
                 mapHintEverDrawn[j] = false;
-                babyHintEverDrawn[j] = false;
+                personHintEverDrawn[j] = false;
                 
                 // clear old dist strings too
                 mPreviousHomeDistStrings[j].deallocateStringElements();
@@ -16882,10 +16935,9 @@ void LivingLifePage::step() {
                         existing->yServer = o.yServer;
                         
                         
-                        if( existing->age < 1.0 && 
-                            existing->heldByAdultID == -1 ) {
+                        if( existing->heldByAdultID == -1 ) {
                             
-                            updateBabyHomeLocation( 
+                            updatePersonHomeLocation( 
                                 existing->id,
                                 lrint( existing->currentPos.x ),
                                 lrint( existing->currentPos.y ) );
@@ -16893,7 +16945,7 @@ void LivingLifePage::step() {
                         else if( existing->holdingID < 0 ) {
                             int babyID = - existing->holdingID;
                             
-                            updateBabyHomeLocation( 
+                            updatePersonHomeLocation( 
                                 babyID,
                                 lrint( existing->currentPos.x ),
                                 lrint( existing->currentPos.y ) );
@@ -17702,10 +17754,9 @@ void LivingLifePage::step() {
                             existing->outOfRange = false;
                             
                             
-                            if( existing->age < 1.0 && 
-                                existing->heldByAdultID == -1 ) {
+                            if( existing->heldByAdultID == -1 ) {
                                 
-                                updateBabyHomeLocation( 
+                                updatePersonHomeLocation( 
                                     existing->id,
                                     lrint( existing->currentPos.x ),
                                     lrint( existing->currentPos.y ) );
@@ -17713,7 +17764,7 @@ void LivingLifePage::step() {
                             else if( existing->holdingID < 0 ) {
                                 int babyID = - existing->holdingID;
                                 
-                                updateBabyHomeLocation( 
+                                updatePersonHomeLocation( 
                                     babyID,
                                     lrint( existing->currentPos.x ),
                                     lrint( existing->currentPos.y ) );
@@ -18306,33 +18357,81 @@ void LivingLifePage::step() {
                                         // trim it off
                                         starPos[0] ='\0';
 
+                                        char person = false;
                                         char baby = false;
                                         
                                         char *babyPos = 
                                             strstr( existing->currentSpeech, 
                                                     " *baby" );
                                         
-                                        int babyID = -1;
+                                        int personID = -1;
 
+                                        const char *personKey = NULL;
+                                        
                                         if( babyPos != NULL ) {
+                                            person = true;
                                             baby = true;
-
+                                            
                                             sscanf( babyPos, 
-                                                    " *baby %d", &babyID );
+                                                    " *baby %d", &personID );
 
                                             babyPos[0] = '\0';
+                                            personKey = "baby";
                                             }
+
+
+                                        char leader = false;
+                                        
+                                        if( ! baby ) {
+                                            char *leaderPos = 
+                                                strstr( 
+                                                    existing->currentSpeech, 
+                                                    " *leader" );
+                                            
+                                            if( leaderPos != NULL ) {
+                                                person = true;
+                                                leader = true;
+                                                sscanf( leaderPos, 
+                                                    " *leader %d", &personID );
+
+                                                leaderPos[0] = '\0';
+                                                personKey = "lead";
+                                                }
+                                            }
+
+                                        
+                                        char follower = false;
+                                        
+                                        if( ! baby && ! leader ) {
+                                            char *follPos = 
+                                                strstr( 
+                                                    existing->currentSpeech, 
+                                                    " *follower" );
+                                            
+                                            if( follPos != NULL ) {
+                                                person = true;
+                                                follower = true;
+                                                sscanf( follPos, 
+                                                        " *follower %d", 
+                                                        &personID );
+
+                                                follPos[0] = '\0';
+                                                personKey = "supp";
+                                                }
+                                            }
+                                        
 
 
                                         if( numRead == 2 ) {
                                             addTempHomeLocation( mapX, mapY,
-                                                                 baby,
-                                                                 babyID );
+                                                                 person,
+                                                                 personID,
+                                                                 personKey );
                                             }
 
-                                        if( babyID != -1 ) {
+                                        if( personID != -1 && baby) {
                                             LiveObject *babyO =
-                                                getLiveObject( babyID );
+                                                getLiveObject( personID );
                                             if( babyO != NULL ) {
                                                 babyO->isGeneticFamily = true;
                                                 }
@@ -18340,7 +18439,7 @@ void LivingLifePage::step() {
                                                 // baby creation message
                                                 // not received yet
                                                 ourUnmarkedOffspring.push_back(
-                                                    babyID );
+                                                    personID );
                                                 }
                                             }
                                         
@@ -18353,10 +18452,23 @@ void LivingLifePage::step() {
                                         if( d >= 5 ) {
                                             char *dString = 
                                                 getSpokenNumber( d );
+
+                                            const char *des = "";
+                                            const char *desSpace = "";
+                                            
+                                            if( follower ) {
+                                                des = translate( 
+                                                    "closestFollower" );
+                                                desSpace = " ";
+                                                }
+                                            
+
                                             char *newSpeech =
                                                 autoSprintf( 
-                                                    "%s - %s %s",
+                                                    "%s - %s%s%s %s",
                                                     existing->currentSpeech,
+                                                    des,
+                                                    desSpace,
                                                     dString,
                                                     translate( "metersAway" ) );
                                             delete [] dString;
@@ -20708,7 +20820,7 @@ void LivingLifePage::makeActive( char inFresh ) {
 
     for( int j=0; j<2; j++ ) {
         mapHintEverDrawn[j] = false;
-        babyHintEverDrawn[j] = false;
+        personHintEverDrawn[j] = false;
         }
 
     mOldHintArrows.deleteAll();
@@ -22960,6 +23072,42 @@ void LivingLifePage::pointerDown( float inX, float inY ) {
             }
         
 
+        if( !canExecute && getObject( destID )->wide ) {
+            // can't reach main tile on wide object
+            // can we reach a side-wing?
+            // only check where we're actually standing
+            // this is a rare case where we're trapped by a wide object
+            // no problem in making user walk as close as possible manually
+            // to try to escape (so we don't need to overhaul all movement
+            // code to deal with wide objects)
+            ObjectRecord *destO = getObject( destID );
+            
+            for( int r=0; r<destO->leftBlockingRadius; r++ ) {
+                int testX = clickDestX - r - 1;
+                if( isGridAdjacent( testX, clickDestY,
+                                    ourLiveObject->xd, ourLiveObject->yd ) ) {
+                    canExecute = true;
+                    break;
+                    }
+                }
+            
+            if( ! canExecute )
+            for( int r=0; r<destO->rightBlockingRadius; r++ ) {
+                int testX = clickDestX + r + 1;
+                if( isGridAdjacent( testX, clickDestY,
+                                    ourLiveObject->xd, ourLiveObject->yd ) ) {
+                    canExecute = true;
+                    break;
+                    }
+                }
+            if( canExecute ) {
+                mustMove = false;
+                playerActionTargetNotAdjacent = true;
+                }
+            }
+        
+        
+
         if( canExecute && ! killMode ) {
             
             const char *action = "";
@@ -23877,6 +24025,41 @@ void LivingLifePage::keyDown( unsigned char inASCII ) {
                             }
                         }
                     else {
+                        // actual, spoken text, not a /command
+                        
+                        if( strstr( typedText,
+                                    translate( "orderCommand" ) ) 
+                            == typedText ) {
+                            
+                            // when issuing an order, place +FOLLOWER+
+                            // above the heads of followers
+                            
+                            const char *tag = translate( "followerMarker" );
+
+                            double curTime = game_getCurrentTime();
+                            for( int f=0; f<gameObjects.size(); f++ ) {
+                                    
+                                LiveObject *follO = 
+                                    gameObjects.getElement( f );
+                                if( follO->followingUs ) {
+                                    if( follO->currentSpeech != NULL ) {
+                                        delete [] follO->currentSpeech;
+                                        follO->currentSpeech = NULL;
+                                        }
+                                    
+                                    follO->currentSpeech = 
+                                        stringDuplicate( tag );
+                                    follO->speechFade = 1.0;
+                                    
+                                    follO->speechIsSuccessfulCurse = false;
+                                    
+                                    follO->speechFadeETATime =
+                                        curTime + 3 +
+                                        strlen( follO->currentSpeech ) / 5;
+                                    }
+                                }
+                            }
+                        
                         // send text to server
 
                         const char *sayCommand = "SAY";
