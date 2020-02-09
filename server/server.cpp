@@ -1659,6 +1659,11 @@ static void deleteMembers( FreshConnection *inConnection ) {
 
 
 
+static SimpleVector<char *> curseWords;
+
+static char *curseSecret = NULL;
+
+
 static SimpleVector<char *> familyNamesAfterEveWindow;
 static SimpleVector<int> familyLineageEveIDsAfterEveWindow;
 static SimpleVector<int> familyCountsAfterEveWindow;
@@ -1905,9 +1910,67 @@ void quitCleanup() {
         fclose( postWindowFamilyLogFile );
         postWindowFamilyLogFile = NULL;
         }
+
+    curseWords.deallocateStringElements();
+    
+    if( curseSecret != NULL ) {
+        delete [] curseSecret;
+        curseSecret = NULL;
+        }
     }
 
 
+
+#include "minorGems/util/crc32.h"
+
+JenkinsRandomSource curseSource;
+
+
+static int cursesUseSenderEmail = 0;
+
+static int useCurseWords = 1;
+
+
+// result NOT destroyed by caller
+static const char *getCurseWord( char *inSenderEmail,
+                                 char *inEmail, int inWordIndex ) {
+    if( ! useCurseWords || curseWords.size() == 0 ) {
+        return "X";
+        }
+
+    if( curseSecret == NULL ) {
+        curseSecret = 
+            SettingsManager::getStringSetting( 
+                "statsServerSharedSecret", "sdfmlk3490sadfm3ug9324" );
+        }
+    
+    char *emailPlusSecret;
+
+    if( cursesUseSenderEmail ) {
+        emailPlusSecret =
+            autoSprintf( "%s_%s_%s", inSenderEmail, inEmail, curseSecret );
+        }
+    else {
+        emailPlusSecret = 
+            autoSprintf( "%s_%s", inEmail, curseSecret );
+        }
+    
+    unsigned int c = crc32( (unsigned char*)emailPlusSecret, 
+                            strlen( emailPlusSecret ) );
+    
+    delete [] emailPlusSecret;
+
+    curseSource.reseed( c );
+    
+    // mix based on index
+    for( int i=0; i<inWordIndex; i++ ) {
+        curseSource.getRandomDouble();
+        }
+
+    int index = curseSource.getRandomBoundedInt( 0, curseWords.size() - 1 );
+    
+    return curseWords.getElementDirect( index );
+    }
 
 
 
@@ -5111,6 +5174,28 @@ GridPos findClosestEmptyMapSpot( int inX, int inY, int inMaxPointsToCheck,
 
 
 
+// returns NULL if not found
+static LiveObject *getPlayerByEmail( char *inEmail ) {
+    for( int j=0; j<players.size(); j++ ) {
+        LiveObject *otherPlayer = players.getElement( j );
+        if( ! otherPlayer->error &&
+            otherPlayer->email != NULL &&
+            strcmp( otherPlayer->email, inEmail ) == 0 ) {
+            
+            return otherPlayer;
+            }
+        }
+    return NULL;
+    }
+
+
+
+static int usePersonalCurses = 0;
+
+
+void sendMessageToPlayer( LiveObject *inPlayer, 
+                          char *inMessage, int inLength );
+
 
 
 SimpleVector<ChangePosition> newSpeechPos;
@@ -5391,6 +5476,8 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
         }
     
     
+    char *dbCurseTargetEmail = NULL;
+
 
     if( cursedName != NULL && 
         strcmp( cursedName, "" ) != 0 ) {
@@ -5406,6 +5493,7 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
             char *targetEmail = getCurseReceiverEmail( cursedName );
             if( targetEmail != NULL ) {
                 setDBCurse( inPlayer->email, targetEmail );
+                dbCurseTargetEmail = targetEmail;
                 }
             }
         }
@@ -5425,6 +5513,7 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
             
             isCurse = true;
             setDBCurse( inPlayer->email, youCursePlayer->email );
+            dbCurseTargetEmail = youCursePlayer->email;
             }
         else if( isBabyShortcut && babyCursePlayer != NULL &&
             spendCurseToken( inPlayer->email ) ) {
@@ -5438,6 +5527,7 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
                 }
             if( targetEmail != NULL ) {
                 setDBCurse( inPlayer->email, targetEmail );
+                dbCurseTargetEmail = targetEmail;
                 }
             }
         else if( isBabyShortcut && babyCursePlayer == NULL &&
@@ -5447,8 +5537,25 @@ static void makePlayerSay( LiveObject *inPlayer, char *inToSay ) {
             isCurse = true;
             
             setDBCurse( inPlayer->email, inPlayer->lastBabyEmail );
+            dbCurseTargetEmail = inPlayer->lastBabyEmail;
             }
         }
+
+    if( dbCurseTargetEmail != NULL && usePersonalCurses ) {
+        LiveObject *targetP = getPlayerByEmail( dbCurseTargetEmail );
+        
+        if( targetP != NULL ) {
+            char *message = autoSprintf( "CU\n%d 1 %s_%s\n#", targetP->id,
+                                         getCurseWord( inPlayer->email,
+                                                       targetP->email, 0 ),
+                                         getCurseWord( inPlayer->email,
+                                                       targetP->email, 1 ) );
+            sendMessageToPlayer( inPlayer,
+                                 message, strlen( message ) );
+            delete [] message;
+            }
+        }
+    
 
 
     if( isCurse ) {
@@ -5566,8 +5673,6 @@ static void forcePlayerToRead( LiveObject *inPlayer,
 char canPlayerUseTool( LiveObject *inPlayer, int inToolID );
 
 
-void sendMessageToPlayer( LiveObject *inPlayer, 
-                          char *inMessage, int inLength );
 
 
 
@@ -7194,8 +7299,8 @@ int processLoggedInPlayer( char inAllowReconnect,
                            GridPos *inForcePlayerPos = NULL ) {
     
 
-    int usePersonalCurses = SettingsManager::getIntSetting( "usePersonalCurses",
-                                                            0 );
+    usePersonalCurses = SettingsManager::getIntSetting( "usePersonalCurses",
+                                                        0 );
     
     if( usePersonalCurses ) {
         // ignore what old curse system said
@@ -7361,6 +7466,13 @@ int processLoggedInPlayer( char inAllowReconnect,
 
     victimTerrifiedPosseSize = 
         SettingsManager::getIntSetting( "victimTerrifiedPosseSize", 3 );
+
+
+    cursesUseSenderEmail = 
+        SettingsManager::getIntSetting( "cursesUseSenderEmail", 0 );
+
+    useCurseWords = 
+        SettingsManager::getIntSetting( "useCurseWords", 1 );
     
     
 
@@ -11574,12 +11686,33 @@ SimpleVector<int> killStatePosseChangedPlayerIDs;
 static int countPosseSize( LiveObject *inTarget ) {
     int p = 0;
     
+    int twinCount = 0;
+
     for( int i=0; i<activeKillStates.size(); i++ ) {
         KillState *s = activeKillStates.getElement( i );
         if( s->targetID == inTarget->id ) {
-            p++;
+
+            LiveObject *killerO = getLiveObject( s->killerID );
+            
+            if( killerO != NULL ) {
+                
+                // twins don't count toward posse size
+                if( ! killerO->isTwin ) {
+                    p++;
+                    }
+                else {
+                    twinCount ++;
+                    }
+                }
             }
         }
+    
+    if( p == 0 &&
+        twinCount > 0 ) {
+        // if twin is only one in posse, count as a posse of 1
+        p = 1;
+        }
+
     return p;
     }
 
@@ -14069,6 +14202,28 @@ int main() {
 
     victimTerrifiedEmotionIndex =
         SettingsManager::getIntSetting( "victimTerrifiedEmotionIndex", 2 );
+
+
+    FILE *f = fopen( "curseWordList.txt", "r" );
+    
+    if( f != NULL ) {
+    
+        int numRead = 1;
+        
+        char buff[100];
+        
+        while( numRead == 1 ) {
+            numRead = fscanf( f, "%99s", buff );
+            
+            if( numRead == 1 ) {
+                if( strlen( buff ) < 6 ) {
+                    // short words only, 3, 4, 5 letters
+                    curseWords.push_back( stringToUpperCase( buff ) );
+                    }
+                }
+            }
+        fclose( f );
+        }
     
 
 #ifdef WIN_32
@@ -17702,11 +17857,22 @@ int main() {
                                                          nextPlayer );
                                     delete [] namedPlayer;
                                     }
+
+                                if( otherToKill != NULL ) {
+                                    if( distance( 
+                                            getPlayerPos( nextPlayer ),
+                                            getPlayerPos( otherToKill ) )
+                                        >= 20 ) {
+                                        // same limit as for YOU
+                                        otherToKill = NULL;
+                                        }
+                                    }
                                 }
 
                             if( otherToKill != NULL ) {
                                 playerIndicesToSendUpdatesAbout.push_back( i );
                                 // spoken intent to kill has unlimited distance
+                                // based on limits above instead
                                 tryToStartKill( nextPlayer, otherToKill->id,
                                                 true );
                                 }
@@ -20566,6 +20732,36 @@ int main() {
                 if( nextPlayer->curseStatus.curseLevel > 0 ) {
                     playerIndicesToSendCursesAbout.push_back( i );
                     }
+                else if( usePersonalCurses ) {
+                    // send a unique CU message to each player
+                    // who has this player cursed
+                    for( int p=0; p<players.size(); p++ ) {
+                        LiveObject *otherPlayer = players.getElement( p );
+                        
+                        if( otherPlayer == nextPlayer ) {
+                            continue;
+                            }
+                        if( otherPlayer->error ||
+                            ! otherPlayer->connected ) {
+                            continue;
+                            }
+                        
+                        if( isCursed( otherPlayer->email, 
+                                      nextPlayer->email ) ) {
+                            char *message = autoSprintf( 
+                                "CU\n%d 1 %s_%s\n#",
+                                nextPlayer->id,
+                                getCurseWord( otherPlayer->email,
+                                              nextPlayer->email, 0 ),
+                                getCurseWord( otherPlayer->email,
+                                              nextPlayer->email, 1 ) );
+                            
+                            sendMessageToPlayer( otherPlayer,
+                                                 message, strlen( message ) );
+                            delete [] message;
+                            }
+                        }
+                    }
 
                 nextPlayer->isNew = false;
                 
@@ -22473,6 +22669,10 @@ int main() {
                     continue;
                     }
 
+                // leave name out of it for now
+                // this bit of code left over from before personal curses
+                // we don't have the sender's email here, b/c this
+                // message goes to everyone.
                 char *line = autoSprintf( "%d %d\n", nextPlayer->id,
                                          nextPlayer->curseStatus.curseLevel );
                 
@@ -23068,11 +23268,25 @@ int main() {
                     int level = o->curseStatus.curseLevel;
                     
                     if( level == 0 ) {
+
+                        if( usePersonalCurses ) {
+                            if( isCursed( nextPlayer->email,
+                                          o->email ) ) {
+                                level = 1;
+                                }
+                            }
+                        }
+                    
+                    if( level == 0 ) {
                         continue;
                         }
                     
 
-                    char *line = autoSprintf( "%d %d\n", o->id, level );
+                    char *line = autoSprintf( "%d %d %s_%s\n", o->id, level,
+                                              getCurseWord( nextPlayer->email,
+                                                            o->email, 0 ),
+                                              getCurseWord( nextPlayer->email,
+                                                            o->email, 1 ) );
                     cursesWorking.appendElementString( line );
                     delete [] line;
                     
