@@ -75,6 +75,8 @@ typedef struct LiveObject {
 
         int curseLevel;
         
+        char *curseName;
+        
         int excessCursePoints;
 
         int curseTokenCount;
@@ -296,6 +298,8 @@ typedef struct LiveObject {
 
         char speechIsSuccessfulCurse;
         
+        char speechIsCurseTag;
+        double lastCurseTagDisplayTime;
 
         char shouldDrawPathMarks;
         double pathMarkFade;
