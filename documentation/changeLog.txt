@@ -3,6 +3,78 @@ This file only list changes to game code.  Changes to content can be found here:
 http://onehouronelife.com/updateLog.php
 
 
+Version 313   ???
+
+--Mousing over an unlearned tool now shows you how many tool learning slots
+  remain.  Fixes #522
+
+--Reconnect now uses new RLOGIN command, which will only succeed if an existing
+  life for you is still in progress (login fails otherwise).  Thus, you can
+  never start a new life by accident when trying to reconnect to a life that
+  has already expired.  Fixes #531
+
+--Fixed potential server-side crash in atoi by using safer strtol instead.
+
+--Fixed server-side crash when VOGM coordinates out of bounds.
+
+--foodScaleFactor applied with ceil (instead of lrint) so that a food never
+  rounds to 0 (like foodScaleFactor of 0.35 applied to popcorn).
+
+--eatBonus and foodScaleFactor now decline over the generations from Eve.
+  eatBonus starts at 4 and eventually reaches 3, with a half-life of 4
+  generations.  foodScaleFactor starts at 1.0 and eventually reaches 1.0, with
+  a half-life of 4 generations (i.e, foodScaleFactor currently doesn't change).
+
+--Fixed HUGE bug in ancestor assignment for genetic scores of older siblings.
+  When walking through the list of living players, to find older sibs that
+  count as ancestors, only the first one encountered was added to the ancestor
+  list.  break in code should have been continue.  This was most obvious with 
+  twins, where only the first twin in the set would receive a pointer to a new
+  baby.  Thanks Twisted.
+
+--Healing steps were not counting as tool use.  Part of
+  jasonrohrer/OneLifeData7#638
+
+--Transformative steps (like sterilizing knife) no longer count as tool use of
+  the original item (you transformed it into a different tool).  Part of
+  jasonrohrer/OneLifeData7#638
+
+--Switched order of testing weapon useability so that otherFamilyOnly is tested
+  before tool learning.  Thus, you don't learn the sword by accident if you
+  shift-click on a family member.  Part of jasonrohrer/OneLifeData7#638
+
+--If target isn't transformed, held tool isn't actually used or learned.
+  Fixes case where recycling sword in roller causes you to learn the sword.
+  Part of jasonrohrer/OneLifeData7#638
+
+--All tool groups avoid THE in learning message (not just those ending in ING).
+  Example:  YOU LEARNED ARCHERY.
+
+--Send food update immediately after reconnecting.  Fixes #547
+
+--You now get one free warning use of each unlearned tool for free, with a
+  message letting you know that using it again will learn the tool and use a
+  slot.  No more wasting tool slots by accident on things you didn't mean to
+  learn.
+
+
+
+
+Server Fixes
+
+--CURSE MY BABY now always targets most-recent baby, whether dead or alive
+  (code has been simplified).  Fixes #546
+
+--Fixed a bug where server sent curse status of an incoming player before
+  sending the first PU telling you about that player's existence, causing your
+  client to ignore their curse status.
+
+--When mother becomes a default leader, her leadership color is assigned
+  correctly (was left blank and white).  Fixes #544
+
+--Min posse size requirements don't apply for snowballs and tattoos.  Fixes #543
+
+
 
 
 Version 311   2020-February-13
