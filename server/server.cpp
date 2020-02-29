@@ -953,6 +953,9 @@ typedef struct LiveObject {
         
         SimpleVector<int> permanentEmots;
 
+        // email of last baby that we had that did /DIE
+        char *lastSidsBabyEmail;
+
     } LiveObject;
 
 
@@ -1754,6 +1757,9 @@ void quitCleanup() {
             }
         if( nextPlayer->lastBabyEmail != NULL  ) {
             delete [] nextPlayer->lastBabyEmail;
+            }
+        if( nextPlayer->lastSidsBabyEmail != NULL ) {
+            delete [] nextPlayer->lastSidsBabyEmail;
             }
 
         if( nextPlayer->murderPerpEmail != NULL  ) {
@@ -5009,7 +5015,12 @@ char findDropSpot( LiveObject *inDroppingPlayer,
                 }
             }
         }
-
+    else {
+        // target biome not bad for player
+        // allow dropping in ANY good biome for player
+        targetFloor = -1;
+        targetBiome = -1;
+        }
     
     
     char found = false;
@@ -5129,9 +5140,16 @@ char findDropSpot( LiveObject *inDroppingPlayer,
                                                 
 
 
-                if( isMapSpotEmpty( x, y ) && 
-                    ( pass > 1 || getMapBiome( x, y ) == targetBiome ) &&
-                    ( pass > 0 || getMapFloor( x, y ) == targetFloor ) ) {
+                if( isMapSpotEmpty( x, y ) 
+                    && 
+                    ( pass > 1 || 
+                      ( targetBiome == -1 && 
+                        isBiomeAllowedForPlayer( inDroppingPlayer, x, y ) )
+                      || getMapBiome( x, y ) == targetBiome ) 
+                    &&
+                    ( pass > 0 || 
+                      targetFloor == -1 || 
+                      getMapFloor( x, y ) == targetFloor ) ) {
                     
                     found = true;
                     if( barrierOn ) {    
@@ -5790,6 +5808,9 @@ static void sendToolExpertMessage( LiveObject *inPlayer,
 
 
 
+void handleDrop( int inX, int inY, LiveObject *inDroppingPlayer,
+                 SimpleVector<int> *inPlayerIndicesToSendUpdatesAbout );
+
 
 
 void makePlayerBiomeSick( LiveObject *nextPlayer, 
@@ -5842,6 +5863,13 @@ static void holdingSomethingNew( LiveObject *inPlayer,
                 inPlayer->yd );
         
         if( sicknessObjectID != -1 ) {
+
+            if( inPlayer->holdingID != 0 ) {
+                GridPos p = getPlayerPos( inPlayer );
+                handleDrop( 
+                    p.x, p.y, inPlayer, NULL );
+                }
+            
             makePlayerBiomeSick( inPlayer, 
                                  sicknessObjectID );
             }
@@ -7556,6 +7584,8 @@ int processLoggedInPlayer( char inAllowReconnect,
     newObject.email = inEmail;
     newObject.origEmail = NULL;
     
+    newObject.lastSidsBabyEmail = NULL;
+
     newObject.lastBabyEmail = NULL;
 
     newObject.id = nextID;
@@ -7693,6 +7723,15 @@ int processLoggedInPlayer( char inAllowReconnect,
                 continue;
                 }
             
+            if( player->lastSidsBabyEmail != NULL &&
+                strcmp( player->lastSidsBabyEmail,
+                        newObject.email ) == 0 ) {
+                // this baby JUST committed SIDS for this mother
+                // skip her
+                // (don't ever send SIDS baby to same mother twice in a row)
+                continue;
+                }
+
             if( isFertileAge( player ) ) {
                 numOfAge ++;
                 
@@ -16217,6 +16256,11 @@ int main() {
                 //Thread::staticSleep( 
                 //    testRandSource.getRandomBoundedInt( 0, 450 ) );
                 
+                
+                // GOTO below jumps here if we need to reparse the message
+                // as a different type
+                RESTART_MESSAGE_ACTION:
+                
                 if( m.type == BUG ) {
                     int allow = 
                         SettingsManager::getIntSetting( "allowBugReports", 0 );
@@ -16581,7 +16625,32 @@ int main() {
                             // mother can have another baby right away
                             parentO->birthCoolDown = 0;
                             }
+
+                        if( parentO != NULL &&
+                            parentO->lastSidsBabyEmail != NULL ) {
+                            delete [] parentO->lastSidsBabyEmail;
+                            parentO->lastSidsBabyEmail = NULL;
+                            }
                         
+                        // walk through all other players and clear THIS
+                        // player from their SIDS mememory
+                        // we only track the most recent parent who had this
+                        // baby SIDS
+                        for( int p=0; p<players.size(); p++ ) {
+                            LiveObject *parent = players.getElement( p );
+                            
+                            if( parent->lastSidsBabyEmail != NULL &&
+                                strcmp( parent->lastSidsBabyEmail,
+                                        nextPlayer->email ) == 0 ) {
+                                delete [] parent->lastSidsBabyEmail;
+                                parent->lastSidsBabyEmail = NULL;
+                                }
+                            }
+                        
+                        if( parentO != NULL ) {
+                            parentO->lastSidsBabyEmail = 
+                                stringDuplicate( nextPlayer->email );
+                            }
                         
                         int holdingAdultID = nextPlayer->heldByOtherID;
 
@@ -20507,49 +20576,12 @@ int main() {
                                                  == 0 ) {
                                             // try treating it like
                                             // a USE action
-                                            
-                                            TransRecord *useTrans =
-                                                getPTrans( 
-                                                    nextPlayer->holdingID,
-                                                    target );
-                                            // handle simple case
-                                            // stacking containers
-                                            // client sends DROP for this
-                                            if( useTrans != NULL &&
-                                                useTrans->newActor == 0 ) {
-                                                
-                                                char canUse = true;
-                                                
-                                                ObjectRecord *newTargetObj = 
-                                                    NULL;
-                                                
-                                                if( useTrans->newTarget > 0 ) {
-                                                    newTargetObj =
-                                                        getObject(
-                                                            useTrans->
-                                                            newTarget );
-                                                    }
-
-                                                if( newTargetObj != NULL &&
-                                                    newTargetObj->
-                                                    isBiomeLimited &&
-                                                    ! canBuildInBiome( 
-                                                        newTargetObj,
-                                                        getMapBiome( m.x,
-                                                                     m.y ) ) ) {
-                                                    canUse = false;
-                                                    }
-
-                                                if( canUse ) {
-                                                    handleHoldingChange(
-                                                        nextPlayer,
-                                                        useTrans->newActor );
-                                                    
-                                                    setMapObject( 
-                                                        m.x, m.y,
-                                                        useTrans->newTarget );
-                                                    }
-                                                }
+                                            m.type = USE;
+                                            m.id = -1;
+                                            m.c = -1;
+                                            playerIndicesToSendUpdatesAbout.
+                                                deleteElementEqualTo( i );
+                                            goto RESTART_MESSAGE_ACTION;
                                             }
                                         else if( canDrop && 
                                                  ! canGoIn &&
@@ -21692,7 +21724,9 @@ int main() {
                         
                         
                         if( newObj != NULL && newObj->permanent &&
-                            oldObj != NULL && ! oldObj->permanent ) {
+                            oldObj != NULL && ! oldObj->permanent &&
+                            ! nextPlayer->holdingWound &&
+                            ! nextPlayer->holdingBiomeSickness ) {
                             // object decayed into a permanent
                             // force drop
                              GridPos dropPos = 
@@ -25393,6 +25427,9 @@ int main() {
                     }
                 if( nextPlayer->lastBabyEmail != NULL ) {
                     delete [] nextPlayer->lastBabyEmail;
+                    }
+                if( nextPlayer->lastSidsBabyEmail != NULL ) {
+                    delete [] nextPlayer->lastSidsBabyEmail;
                     }
 
                 if( nextPlayer->murderPerpEmail != NULL ) {

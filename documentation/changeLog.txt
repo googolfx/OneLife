@@ -3,7 +3,13 @@ This file only list changes to game code.  Changes to content can be found here:
 http://onehouronelife.com/updateLog.php
 
 
-Version 313   ???
+Server Fixes
+
+--Fixed server crash in new lastSidsBabyEmail code.
+
+
+
+Version 312   2020-February-28
 
 --Mousing over an unlearned tool now shows you how many tool learning slots
   remain.  Fixes #522
@@ -56,6 +62,44 @@ Version 313   ???
   message letting you know that using it again will learn the tool and use a
   slot.  No more wasting tool slots by accident on things you didn't mean to
   learn.
+
+--After /DIE, the last mother who had you is blocked for you, ensuring that you
+  don't /DIE-cycle back to the same mother again and again (not even in
+  lowpop).  If there's only ONE mother available, doing /DIE one time will
+  cause you to spawn as Eve.  Note that if there is more than one mother, you
+  will cycle between them with /DIE.  The only change here is that you will
+  never return to the same mother over and over, without other mothers being
+  tried in between.  Fixes #549
+
+--Added support for same-color verification when checking for sprite-subset for
+  single-sprite objects.  This allows dyed objects to count as NOT the same
+  object for initial-only creation sounds.
+
+--Fixed case where car runs out of gas in a bad biome and drops a biome
+  sickness object on the ground.
+
+--Fixed case where all same-biome (or floor) drop spots are full, causing
+  object to strangely drop in a distant spot.  The reason for prefering
+  same-biome or floor for drops was to avoid dropping into a bad biome.
+  Might as well just check that the drop spot is not a bad biome directly (and
+  allow other types of cross-boundary drops).  Fixes #550
+
+--Player message DROP is a synonym for USE when DROP can't apply.  However,
+  the implementation of the USE behavior for DROP was a very simple piece of
+  code that missed a bunch of cases handled by the real USE action.  Now
+  handling DROP-as-USE with the real USE code (using a goto, yee-haw).  This
+  fixes a bug where you could DROP a pie onto a non-empty table, starting the 
+  construction of the feast table (which is supposed to require an empty table,
+  according to the real USE code) and hiding the items contained by the table.
+  Fixes #551.
+
+--Fixed so that painting walls makes correct sound (plays initial-only
+  creation sound because color of sprites changes).
+
+--Dug rabbits that had very few move options were sometimes still settling and
+  digging new holes on roads and floors.  Now they avoid floors at all costs,
+  re-settling in their original location if necessary.  Fixes #552
+
 
 
 
