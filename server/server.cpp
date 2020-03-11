@@ -967,7 +967,9 @@ typedef struct LiveObject {
 
         // email of last baby that we had that did /DIE
         char *lastSidsBabyEmail;
-
+        
+        char everHomesick;
+        
     } LiveObject;
 
 
@@ -1321,6 +1323,16 @@ char *getPlayerName( int inID ) {
         return o->name;
         }
     return NULL;
+    }
+
+
+
+int getPlayerLineage( int inID ) {
+    LiveObject *o = getLiveObject( inID );
+    if( o != NULL ) {
+        return o->lineageEveID;
+        }
+    return -1;
     }
 
 
@@ -7682,6 +7694,8 @@ int processLoggedInPlayer( int inAllowOrForceReconnect,
 
     newObject.lastBabyEmail = NULL;
 
+    newObject.everHomesick = false;
+
     newObject.id = nextID;
     nextID++;
 
@@ -7816,6 +7830,18 @@ int processLoggedInPlayer( int inAllowOrForceReconnect,
             if( player->vogMode ) {
                 continue;
                 }
+
+            GridPos motherPos = getPlayerPos( player );
+            int homeStatus = isHomeland( motherPos.x, motherPos.y,
+                                         player->lineageEveID );
+            
+            if( homeStatus == -1 ||
+                ( homeStatus == 0 &&
+                  player->everHomesick ) ) {
+                // mother can't have babies here
+                continue;
+                }
+                
             
             if( player->lastSidsBabyEmail != NULL &&
                 strcmp( player->lastSidsBabyEmail,
@@ -8050,7 +8076,8 @@ int processLoggedInPlayer( int inAllowOrForceReconnect,
         }
 
     
-    if( parentChoices.size() > 0 ) {
+    if( parentChoices.size() > 0 &&
+        SettingsManager::getIntSetting( "propUpWeakestRace", 1 ) ) {
         // next, filter mothers by weakest race amoung them
         int preFilterCount = parentChoices.size();
         
@@ -8102,7 +8129,8 @@ int processLoggedInPlayer( int inAllowOrForceReconnect,
 
 
     
-    if( parentChoices.size() > 0 ) {
+    if( parentChoices.size() > 0 &&
+        SettingsManager::getIntSetting( "propUpWeakestFamily", 1 ) ) {
         int preFilterCount = parentChoices.size();
         
         // next, filter mothers by weakest family amoung them
@@ -8187,6 +8215,38 @@ int processLoggedInPlayer( int inAllowOrForceReconnect,
                 }
             }
         }
+
+
+    
+    if( parentChoices.size() > 0 ) {
+        int generationNumber =
+            SettingsManager::getIntSetting( "forceEveAfterGenerationNumber",
+                                            40 );
+        
+        int minGen = generationNumber + 1;
+        
+        for( int i=0; i<players.size(); i++ ) {
+            LiveObject *o = players.getElement( i );
+            
+            if( isPlayerCountable( o ) ) {
+                
+                if( o->parentChainLength < minGen ) {
+                    minGen = o->parentChainLength;
+                    }
+                }
+            }
+
+        if( minGen > generationNumber ) {
+            AppLog::infoF( 
+                        "Youngest player generation on server is %d, "
+                        "which is above our trigger level %d, "
+                        "forcing Eve.",
+                        minGen, generationNumber );    
+            parentChoices.deleteAll();
+            }
+        
+        }
+        
     
     
 
@@ -9365,7 +9425,10 @@ int processLoggedInPlayer( int inAllowOrForceReconnect,
             delete [] message;
             }
         }
+    
 
+    logHomelandBirth( newObject.xs, newObject.ys,
+                      newObject.lineageEveID );
     
     return newObject.id;
     }
@@ -13144,6 +13207,58 @@ void getLineageLineForPlayer( LiveObject *inPlayer,
 
 
 
+// result NOT destroyed by caller
+// can be NULL if not found
+static char *getLineageLastName( int inLineageEveID ) {
+    for( int i=0; i<players.size(); i++ ) {
+        LiveObject *p = players.getElement( i );
+        
+        if( p->lineageEveID == inLineageEveID &&
+            p->familyName != NULL ) {
+            return p->familyName;
+            }
+        }
+    return NULL;
+    }
+
+
+
+
+static void sendHomelandMessage( LiveObject *nextPlayer,
+                                 int homeLineageEveID,
+                                 GridPos homeCenter ) {    
+    const char *famName = "0";
+    
+    if( homeLineageEveID != -1 ) {
+        char *realFamName =
+            getLineageLastName( 
+                homeLineageEveID );
+        if( realFamName != NULL ) {
+            famName = realFamName;
+            }
+        else {
+            famName = "UNNAMED";
+            }
+        }
+    
+    char *message = 
+        autoSprintf( 
+            "HL\n"
+            "%d %d %s\n#",
+            homeCenter.x -
+            nextPlayer->birthPos.x,
+            homeCenter.y -
+            nextPlayer->birthPos.y,
+            famName );
+    sendMessageToPlayer( 
+        nextPlayer, 
+        message, 
+        strlen( message ) );
+    delete [] message;
+    }
+
+
+
 static void endBiomeSickness( 
     LiveObject *nextPlayer,
     int i,
@@ -13182,7 +13297,6 @@ static void endBiomeSickness(
     else {
         // clear
         newEmotIndices.push_back( -1 );
-        // 3 sec
         newEmotTTLs.push_back( 0 );
         }
     }
@@ -17948,6 +18062,131 @@ int main() {
                                         nextPlayer, i,
                                         &playerIndicesToSendUpdatesAbout );
                                     }
+
+                                if( sicknessObjectID == -1 &&
+                                    ! nextPlayer->emotFrozen ) {
+                                    // check if path starts/ends
+                                    // in/out of home
+
+                                    int homeStart =
+                                        isHomeland( 
+                                            nextPlayer->xs,
+                                            nextPlayer->ys,
+                                            nextPlayer->lineageEveID );
+                                    
+                                    int endStep = nextPlayer->pathLength - 1;
+                                    
+                                    int homeEnd =
+                                        isHomeland( 
+                                            nextPlayer->pathToDest[endStep].x,
+                                            nextPlayer->pathToDest[endStep].y,
+                                            nextPlayer->lineageEveID );
+
+                                    char boundaryCross = false;
+                                    if( homeStart == homeEnd &&
+                                        homeEnd == -1 ) {
+                                        // player still outside homeland
+                                        // but did they cross a boundary
+                                        // into some other homeland?
+
+                                        int lineageA = 0;
+                                        int lineageB = 0;
+                                        GridPos dummyCenter;
+
+                                        getHomelandCenter(
+                                            nextPlayer->xs,
+                                            nextPlayer->ys,
+                                            &dummyCenter,
+                                            &lineageA );
+                                        getHomelandCenter(
+                                            nextPlayer->pathToDest[endStep].x,
+                                            nextPlayer->pathToDest[endStep].y,
+                                            &dummyCenter,
+                                            &lineageB );
+                                        
+                                        // even if B is -1, we have a boundary
+                                        // cross
+                                        if( lineageA != lineageB ) {
+                                            boundaryCross = true;
+                                            }
+                                        }
+
+                                    if( homeStart != homeEnd ) {
+                                        boundaryCross = true;
+                                        
+                                        int newEmotIndex = -1;
+                                        const char *speechWord = NULL;
+                                        
+                                        if( homeEnd == -1 ) {
+                                            newEmotIndex =
+                                                SettingsManager::
+                                                getIntSetting( 
+                                                    "homesickEmotionIndex", 
+                                                    -1 );
+                                            speechWord = "HOMESICK";
+                                            nextPlayer->everHomesick = true;
+                                            }
+                                        else if( 
+                                            homeEnd == 1 ||
+                                            ( ! nextPlayer->everHomesick &&
+                                              homeEnd == 0 ) ) {
+                                            newEmotIndex =
+                                                SettingsManager::
+                                                getIntSetting( 
+                                                    "homeEmotionIndex", 
+                                                    -1 );
+                                            speechWord = "HOME";
+                                            }
+                                        
+                                        if( newEmotIndex != -1 ) {
+                                            newEmotPlayerIDs.push_back( 
+                                                nextPlayer->id );
+        
+                                            newEmotIndices.push_back( 
+                                                newEmotIndex );
+                                            // 5 sec
+                                            newEmotTTLs.push_back( 5 );
+                                            }
+                                        
+                                        if( speechWord != NULL ) {
+                                            // put word above their head
+                                            // (only for them to see)
+                                            char *message = autoSprintf( 
+                                                "PS\n"
+                                                "%d/0 +%s+\n#",
+                                                nextPlayer->id, speechWord );
+                                            sendMessageToPlayer( 
+                                                nextPlayer, 
+                                                message, 
+                                                strlen( message ) );
+                                            delete [] message;
+                                            }
+                                        }
+                                    
+                                    if( boundaryCross ) {
+                                        // when player crosses boundary
+                                        // check if they've entered a homeland
+                                        // tell them about the center
+                                        GridPos homeCenter;
+                                        int homeLineageEveID;
+                                        char isSomeHomeland =
+                                            getHomelandCenter(
+                                              nextPlayer->pathToDest[endStep].x,
+                                              nextPlayer->pathToDest[endStep].y,
+                                              &homeCenter,
+                                              &homeLineageEveID );
+                                        
+                                        if( isSomeHomeland ) {
+                                            // send them HL message
+                                            sendHomelandMessage( 
+                                                nextPlayer,
+                                                homeLineageEveID,
+                                                homeCenter );
+                                            }
+                                        }
+
+                                    
+                                    }                                
                                 }
                             }
                         }
@@ -23616,6 +23855,26 @@ int main() {
             delete [] lines;
             }
         
+        
+
+        SimpleVector<HomelandInfo> homelandList = getHomelandChanges();
+        
+        if( homelandList.size() > 0 ) {
+            for( int i=0; i<homelandList.size(); i++ ) {
+                HomelandInfo hi = homelandList.getElementDirect( i );
+                
+                for( int p=0; p<players.size(); p++ ) {
+                    LiveObject *nextPlayer = players.getElement( p );
+                    
+                    GridPos pos = getPlayerPos( nextPlayer );
+                    
+                    if( distance( pos, hi.center ) < hi.radius ) {
+                        sendHomelandMessage( nextPlayer,
+                                             hi.lineageEveID, hi.center );
+                        }
+                    }
+                }
+            }
         
 
         
