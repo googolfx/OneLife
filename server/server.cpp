@@ -4278,6 +4278,9 @@ GridPos getClosestPlayerPos( int inX, int inY ) {
         if( o->error ) {
             continue;
             }
+        if( o->heldByOther ) {
+            continue;
+            }
         
         GridPos p;
 
@@ -8213,6 +8216,7 @@ int processLoggedInPlayer( int inAllowOrForceReconnect,
                     break;
                     }
                 }
+            delete [] races;
             }
         }
 
@@ -9841,6 +9845,17 @@ static char containmentPermitted( int inContainerID, int inContainedID ) {
         
         if( numRead == 1 ) {
             
+            // clean up # character that might delimit end of string
+            int tagLen = strlen( tag );
+            
+            for( int i=0; i<tagLen; i++ ) {
+                if( tag[i] == '#' ) {
+                    tag[i] = '\0';
+                    tagLen = i;
+                    break;
+                    }
+                }
+
             char *locInContainerName =
                 strstr( getObject( inContainerID )->description, tag );
             
@@ -9850,10 +9865,11 @@ static char containmentPermitted( int inContainerID, int inContainedID ) {
                 // don't want contained to be +contHot
                 // and contaienr to be +contHotPlates
                 
-                char end = locInContainerName[ strlen( tag ) ];
+                char end = locInContainerName[ tagLen ];
                 
                 if( end == ' ' ||
-                    end == '\0' ) {
+                    end == '\0'||
+                    end == '#' ) {
                     return true;
                     }
                 }
@@ -13797,6 +13813,82 @@ static LiveObject *getPlayerByName( char *inName, LiveObject *inSkip ) {
 
 
 
+static void findExpertForPlayer( LiveObject *inPlayer, 
+                                 ObjectRecord *inTouchedObject ) {
+    int race = getSpecialistRace( inTouchedObject );
+    
+    if( race == -1 ) {
+        return;
+        }
+
+    if( getObject( inPlayer->displayID )->race  == race ) {
+        // they ARE this expert themselves
+        return;
+        }
+    
+    GridPos playerPos = getPlayerPos( inPlayer );
+
+    double minDist = DBL_MAX;
+    LiveObject *closestExpert = NULL;
+    
+    for( int i=0; i<players.size(); i++ ) {
+        LiveObject *p = players.getElement( i );
+        
+        if( getObject( p->displayID )->race == race ) {
+            GridPos pos = getPlayerPos( p );
+            
+            double d = distance( pos, playerPos );
+            
+            if( d < minDist ) {
+                minDist = d;
+                closestExpert = p;
+                }
+            }
+        }
+
+    const char *biomeName = getBadBiomeName( inTouchedObject );
+    
+    char *bName = NULL;
+    
+    if( biomeName != NULL ) {
+        char found;
+        bName = replaceAll( biomeName, "_", " ", &found );
+        }
+    else {
+        bName = stringDuplicate( "UNKNOWN BIOME" );
+        }
+
+    char *message = NULL;
+    
+    if( closestExpert != NULL ) {
+        GridPos ePos = getPlayerPos( closestExpert );
+
+        message = autoSprintf( "PS\n"
+                               "%d/0 EXPERT FOR %s "
+                               "*expert %d *map %d %d\n#",
+                               inPlayer->id,
+                               bName,
+                               closestExpert->id,
+                               ePos.x - inPlayer->birthPos.x,
+                               ePos.y - inPlayer->birthPos.y );
+        }
+    else {
+        message = autoSprintf( "PS\n"
+                               "%d/0 NO EXPERTS EXIST FOR %s\n#",
+                               inPlayer->id,
+                               bName );
+        }
+    
+    delete [] bName;
+    
+
+    sendMessageToPlayer( inPlayer, message, strlen( message ) );
+    delete [] message;
+    }
+
+
+
+
 // if inAll, generates info for all players, and doesn't touch 
 //           followingUpdate flags
 // returns NULL if no following message
@@ -17032,10 +17124,6 @@ int main() {
                                         gravePos.x, gravePos.y,
                                         nextPlayer->id );
                                     
-                                    setHeldGraveOrigin( adult, 
-                                                        gravePos.x,
-                                                        gravePos.y,
-                                                        0 );
                                     
                                     playerIndicesToSendUpdatesAbout.push_back(
                                         getLiveObjectIndex( holdingAdultID ) );
@@ -17092,6 +17180,12 @@ int main() {
                                     // in their hands
                                     adult->holdingID = babyBonesID;
                                     
+                                    setHeldGraveOrigin( adult, 
+                                                        gravePos.x,
+                                                        gravePos.y,
+                                                        0 );
+
+
                                     // this works to force client to play
                                     // creation sound for baby bones.
                                     adult->heldTransitionSourceID = 
@@ -18781,8 +18875,9 @@ int main() {
                                     GridPos p = getPlayerPos( nextPlayer );
                                     
                                     textToAdd = autoSprintf( 
-                                        "%s *map %d %d",
-                                        m.saidText, p.x, p.y );
+                                        "%s *map %d %d %.f",
+                                        m.saidText, p.x, p.y, 
+                                        Time::timeSec() );
                                     
                                     if( strlen( textToAdd ) >= 
                                         MAP_METADATA_LENGTH ) {
@@ -18966,6 +19061,12 @@ int main() {
                                 if( targetObj->permanent &&
                                     targetObj->written ) {
                                     forcePlayerToRead( nextPlayer, target );
+                                    }
+                                
+                                if( targetObj->permanent &&
+                                    targetObj->expertFind ) {
+                                    findExpertForPlayer( nextPlayer,
+                                                         targetObj );
                                     }
                                 
 
@@ -21110,24 +21211,53 @@ int main() {
                                             canGoIn = true;
                                             }
                                         
+                                        char forceUse = false;
+                                        
+                                        if( canDrop && 
+                                            canGoIn &&
+                                            targetSlots > 0 &&
+                                            nextPlayer->numContained == 0 &&
+                                            getNumContained( m.x, m.y ) == 0 ) {
+                                            
+                                            // container empty
+                                            // is there a transition that might
+                                            // apply instead?
+                                            
+                                            // only consider a consuming
+                                            // transition (custom containment
+                                            // like grapes in a basket which
+                                            // aren't in container slots )
+
+                                            TransRecord *t = 
+                                                getPTrans( 
+                                                    nextPlayer->holdingID, 
+                                                    target );
+                                            
+                                            if( t != NULL && 
+                                                t->newActor == 0 ) {
+                                                forceUse = true;
+                                                }
+                                            }
                                         
 
                                         // DROP indicates they 
                                         // right-clicked on container
                                         // so use swap mode
                                         if( canDrop && 
-                                            canGoIn && 
+                                            canGoIn &&
+                                            ! forceUse &&
                                             addHeldToContainer( 
                                                 nextPlayer,
                                                 target,
                                                 m.x, m.y, true ) ) {
                                             // handled
                                             }
-                                        else if( canDrop && 
-                                                 ! canGoIn &&
-                                                 targetObj->permanent &&
-                                                 nextPlayer->numContained 
-                                                 == 0 ) {
+                                        else if( forceUse ||
+                                                 ( canDrop && 
+                                                   ! canGoIn &&
+                                                   targetObj->permanent &&
+                                                   nextPlayer->numContained 
+                                                   == 0 ) ) {
                                             // try treating it like
                                             // a USE action
                                             m.type = USE;
@@ -25289,18 +25419,29 @@ int main() {
                                         // make coords birth-relative
                                         // to person reading map
                                         int mapX, mapY;
+
+                                        // turn time into relative age in sec
+                                        timeSec_t mapT = 0;
                                         
                                         int numRead = 
                                             sscanf( starLoc, 
-                                                    " *map %d %d",
-                                                    &mapX, &mapY );
-                                        if( numRead == 2 ) {
+                                                    " *map %d %d %lf",
+                                                    &mapX, &mapY, &mapT );
+                                        if( numRead == 2 || numRead == 3 ) {
                                             starLoc[0] = '\0';
+
+                                            timeSec_t age = 0;
+                                            
+                                            if( numRead == 3 ) {
+                                                age = Time::timeSec() - mapT;
+                                                }
+
                                             char *newTrimmed = autoSprintf( 
-                                                "%s *map %d %d",
+                                                "%s *map %d %d %.f",
                                                 trimmedPhrase,
                                                 mapX - nextPlayer->birthPos.x, 
-                                                mapY - nextPlayer->birthPos.y );
+                                                mapY - nextPlayer->birthPos.y,
+                                                age );
                                             
                                             delete [] trimmedPhrase;
                                             trimmedPhrase = newTrimmed;

@@ -745,6 +745,30 @@ static void setupFamHomeland( ObjectRecord *inR ) {
     }
 
 
+static void setupForcedBiome( ObjectRecord *inR ) {
+    inR->forceBiome = -1;
+
+    char *pos = strstr( inR->description, "+biomeSet" );
+
+    if( pos != NULL ) {
+        
+        sscanf( pos, "+biomeSet%d", &( inR->forceBiome ) );
+        }
+    }
+
+
+
+static void setupExpertFind( ObjectRecord *inR ) {
+    inR->expertFind = false;
+
+    char *pos = strstr( inR->description, "+expertFind" );
+
+    if( pos != NULL ) {
+        inR->expertFind = true;
+        }
+    }
+
+
 
 int getMaxSpeechPipeIndex() {
     return maxSpeechPipeIndex;
@@ -816,6 +840,10 @@ float initObjectBankStep() {
                 
                 setupFamHomeland( r );
                 
+                setupForcedBiome( r );
+                
+                setupExpertFind( r );
+
 
                 // do this later, after we parse floorHugging
                 // setupWall( r );
@@ -3578,6 +3606,10 @@ int addObject( const char *inDescription,
     setupAlcohol( r );
 
     setupFamHomeland( r );
+    
+    setupForcedBiome( r );
+
+    setupExpertFind( r );
 
     setupWall( r );
 

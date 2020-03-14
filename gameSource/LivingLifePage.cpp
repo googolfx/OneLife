@@ -18550,9 +18550,18 @@ void LivingLifePage::step() {
                                         
                                         int mapX, mapY;
                                         
+                                        int mapAge = 0;
+                                        
                                         int numRead = sscanf( starPos,
-                                                              " *map %d %d",
-                                                              &mapX, &mapY );
+                                                              " *map %d %d %d",
+                                                              &mapX, &mapY,
+                                                              &mapAge );
+
+                                        int mapYears = 
+                                            floor( 
+                                                mapAge * 
+                                                getOurLiveObject()->ageRate );
+                                        
                                         // trim it off
                                         starPos[0] ='\0';
 
@@ -18618,10 +18627,29 @@ void LivingLifePage::step() {
                                                 personKey = "supp";
                                                 }
                                             }
+
+                                        
+                                        if( ! baby && ! leader && ! follower ) {
+                                            char *expertPos = 
+                                                strstr( 
+                                                    existing->currentSpeech, 
+                                                    " *expert" );
+                                            
+                                            if( expertPos != NULL ) {
+                                                person = true;
+                                                sscanf( expertPos, 
+                                                        " *expert %d", 
+                                                        &personID );
+
+                                                expertPos[0] = '\0';
+                                                personKey = "expt";
+                                                }
+                                            }
+                                        
                                         
 
 
-                                        if( numRead == 2 ) {
+                                        if( numRead == 2 || numRead == 3 ) {
                                             addTempHomeLocation( mapX, mapY,
                                                                  person,
                                                                  personID,
@@ -18672,6 +18700,41 @@ void LivingLifePage::step() {
                                                     translate( "metersAway" ) );
                                             delete [] dString;
                                             delete [] existing->currentSpeech;
+
+                                            if( mapYears > 0 ) {
+                                                const char *yearKey = 
+                                                    "yearsAgo";
+                                                if( mapYears == 1 ) {
+                                                    yearKey = "yearAgo";
+                                                    }
+                                                
+                                                if( mapYears >= 2000 ) {
+                                                    mapYears /= 1000;
+                                                    yearKey = "millenniaAgo";
+                                                    }
+                                                else if( mapYears >= 200 ) {
+                                                    mapYears /= 100;
+                                                    yearKey = "centuriesAgo";
+                                                    }
+                                                else if( mapYears >= 20 ) {
+                                                    mapYears /= 10;
+                                                    yearKey = "decadesAgo";
+                                                    }
+
+                                                char *ageString =
+                                                    getSpokenNumber( mapYears );
+                                                char *newSpeechB =
+                                                    autoSprintf( 
+                                                        "%s - %s %s %s",
+                                                        newSpeech,
+                                                        translate( "made" ),
+                                                        ageString,
+                                                        translate( yearKey ) );
+                                                delete [] ageString;
+                                                delete [] newSpeech;
+                                                newSpeech = newSpeechB;
+                                                }
+                                            
                                             existing->currentSpeech =
                                                 newSpeech;
                                             }
@@ -19589,7 +19652,7 @@ void LivingLifePage::step() {
                         mHungerSlipVisible = 0;
                         }
                     else if( ourLiveObject->foodStore <= 4 &&
-                             computeCurrentAge( ourLiveObject ) < 57 ) {
+                             computeCurrentAge( ourLiveObject ) < 57.33 ) {
                         
                         // don't play hunger sounds at end of life
                         // because it interrupts our end-of-life song
@@ -23152,9 +23215,14 @@ void LivingLifePage::pointerDown( float inX, float inY ) {
         
         char canExecute = false;
         char sideAccess = false;
+        char noBackAccess = false;
         
         if( destID > 0 && getObject( destID )->sideAccess ) {
             sideAccess = true;
+            }
+        
+        if( destID > 0 && getObject( destID )->noBackAccess ) {
+            noBackAccess = true;
             }
         
 
@@ -23171,6 +23239,11 @@ void LivingLifePage::pointerDown( float inX, float inY ) {
                 ( clickDestY > ourLiveObject->yd ||
                   clickDestY < ourLiveObject->yd ) ) {
                 // trying to access side-access object from N or S
+                canExecute = false;
+                }
+            if( noBackAccess &&
+                ( clickDestY < ourLiveObject->yd ) ) {
+                // trying to access noBackAccess object from N
                 canExecute = false;
                 }
             }
@@ -23203,12 +23276,23 @@ void LivingLifePage::pointerDown( float inX, float inY ) {
                 // don't consider N or S neighbors
                 nLimit = 3;
                 }
+            else if( noBackAccess ) {
+                // don't consider N neighbor
+                nLimit = 4;
+                }
             else if( destID > 0 &&
-                     ourLiveObject->holdingID == 0 && 
+                     ( ourLiveObject->holdingID <= 0 ||
+                       ( getObject( ourLiveObject->holdingID )->permanent &&
+                         strstr( getObject( ourLiveObject->holdingID )->
+                                 description, "sick" ) != NULL ) )
+                     &&
                      getObject( destID )->permanent &&
                      ! getObject( destID )->blocksWalking ) {
                 
-                TransRecord *handTrans = getTrans( 0, destID );
+                TransRecord *handTrans = NULL;
+                if( ourLiveObject->holdingID == 0 ) {
+                    handTrans = getTrans( 0, destID );
+                    }
                 
                 if( handTrans == NULL ||
                     ( handTrans->newActor != 0 &&
