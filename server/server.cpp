@@ -13756,6 +13756,22 @@ static char isAccessBlocked( LiveObject *inPlayer,
 
 
 
+void sendHungryWorkSpeech( LiveObject *inPlayer ) {
+    // tell player about it with private speech
+    char *message = autoSprintf( 
+        "PS\n"
+        "%d/0 +MORE FOOD+\n#",
+        inPlayer->id );
+    
+    sendMessageToPlayer( 
+        inPlayer, 
+        message, 
+        strlen( message ) );
+    delete [] message;
+    }
+
+
+
 // cost set to 0 unless hungry work not blocked
 char isHungryWorkBlocked( LiveObject *inPlayer, 
                           int inNewTarget, int *outCost ) {          
@@ -18218,7 +18234,13 @@ int main() {
                                                     "homesickEmotionIndex", 
                                                     -1 );
                                             speechWord = "HOMESICK";
-                                            nextPlayer->everHomesick = true;
+                                            // don't enforce the every-homesick
+                                            // then homesick outside
+                                            // of homelands restriction for 
+                                            // no-homeland Eves
+                                            if( ! nextPlayer->isEve ) {
+                                                nextPlayer->everHomesick = true;
+                                                }
                                             }
                                         else if( 
                                             homeEnd == 1 ||
@@ -18229,7 +18251,15 @@ int main() {
                                                 getIntSetting( 
                                                     "homeEmotionIndex", 
                                                     -1 );
-                                            speechWord = "HOME";
+                                            
+                                            if( homeEnd == 0 ) {
+                                                // a nomad with no homeland
+                                                speechWord = "FREE REIN";
+                                                }
+                                            else {
+                                                // returning to homeland
+                                                speechWord = "HOME";
+                                                }
                                             }
                                         
                                         if( newEmotIndex != -1 ) {
@@ -19448,6 +19478,8 @@ int main() {
                                             r->newTarget,
                                             &hungryWorkCost ) ) {
                                         r = NULL;
+                                        
+                                        sendHungryWorkSpeech( nextPlayer );
                                         }
                                     }
 
@@ -24216,7 +24248,25 @@ int main() {
                     }
 
 
-
+                
+                // send homeland status for where player is standing
+                GridPos playerPos = getPlayerPos( nextPlayer );
+                GridPos homeCenter;
+                int homeLineageEveID;
+                
+                char isSomeHomeland = 
+                    getHomelandCenter( playerPos.x, playerPos.y, 
+                                       &homeCenter, &homeLineageEveID );
+                if( isSomeHomeland ) {
+                    // send them HL message
+                    sendHomelandMessage( 
+                        nextPlayer,
+                        homeLineageEveID,
+                        homeCenter );
+                    }
+                
+                
+                
                 // send lineage for everyone alive
                 
                 
