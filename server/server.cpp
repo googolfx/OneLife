@@ -13918,19 +13918,50 @@ static void findExpertForPlayer( LiveObject *inPlayer,
     double minDist = DBL_MAX;
     LiveObject *closestExpert = NULL;
     
-    for( int i=0; i<players.size(); i++ ) {
-        LiveObject *p = players.getElement( i );
-        
-        if( getObject( p->displayID )->race == race ) {
-            GridPos pos = getPlayerPos( p );
+    int chunkD = getMaxChunkDimension();
+    
+
+    // two passes
+    // first pass, look for experts that are very close or standing in homelands
+    // second pass, look for any expert
+    for( int pass=0; pass<2; pass++ ) {
+
+        for( int i=0; i<players.size(); i++ ) {
+            LiveObject *p = players.getElement( i );
             
-            double d = distance( pos, playerPos );
-            
-            if( d < minDist ) {
-                minDist = d;
-                closestExpert = p;
+            if( getObject( p->displayID )->race == race ) {
+                GridPos pos = getPlayerPos( p );            
+                double d = distance( pos, playerPos );
+                
+                
+                if( d < minDist ) {
+                    if( pass == 1 || 
+                        d < chunkD || 
+                        isHomeland( pos.x, pos.y, p->lineageEveID ) == 1 ) {
+                        
+                        // player has no homeland or they are standing in their
+                        // homeland
+                        
+                        // OR they are super-close to us
+                        // (if there's a very nearby expert, don't send player
+                        //  off to find homeland).
+                        
+                        // OR we're on second pass
+                        // in that case, consider distant experts that
+                        // are outside their homelands
+
+                        minDist = d;
+                        closestExpert = p;
+                        }
+                    }
                 }
             }
+        
+        if( closestExpert != NULL ) {
+            // found one on first pass
+            break;
+            }
+        // else continue to second pass
         }
 
     const char *biomeName = getBadBiomeName( inTouchedObject );
@@ -13949,13 +13980,40 @@ static void findExpertForPlayer( LiveObject *inPlayer,
     
     if( closestExpert != NULL ) {
         GridPos ePos = getPlayerPos( closestExpert );
+        
+        int eID = closestExpert->id;
 
+        const char *phrase = "EXPERT";
+        
+        if( minDist > chunkD &&
+            isHomeland( ePos.x, ePos.y, closestExpert->lineageEveID ) == 1 ) {
+            // expert is far away.
+            // they will probably move by the time we get to them
+            
+            // point to center of homeland instead, if we have one
+            GridPos homeCenter;
+            int homeEve = 0;
+
+            if( getHomelandCenter( ePos.x, ePos.y, &homeCenter, &homeEve ) ) {
+                
+                if( homeEve == closestExpert->lineageEveID ) {
+                    // leave 0 for person ID
+                    // because we lead them to well location instead of person
+                    eID = 0;
+                    ePos = homeCenter;
+                    phrase = "EXPERT VILLAGE";
+                    }
+                }
+            }
+        
+        
         message = autoSprintf( "PS\n"
-                               "%d/0 EXPERT FOR %s "
+                               "%d/0 %s FOR %s "
                                "*expert %d *map %d %d\n#",
                                inPlayer->id,
+                               phrase,
                                bName,
-                               closestExpert->id,
+                               eID,
                                ePos.x - inPlayer->birthPos.x,
                                ePos.y - inPlayer->birthPos.y );
         }
@@ -19592,6 +19650,27 @@ int main() {
                                         }
                                     }
                                 
+
+                                if( r != NULL &&
+                                    r->newActor > 0 &&
+                                    getObject( r->newActor )->floor ) {
+                                    // special case:
+                                    // ending up with floor in hand means
+                                    // we stick floor UNDER target
+                                    // object on ground
+                                    
+                                    // but only if there's no floor there
+                                    // already
+                                    if( getMapFloor( m.x, m.y ) == 0 ) {    
+                                        setMapFloor( m.x, m.y, r->newActor );
+                                        nextPlayer->holdingID = 0;
+                                        nextPlayer->holdingEtaDecay = 0;
+                                        }
+                                    
+                                    // always cancel transition in either case
+                                    r = NULL;
+                                    }
+
                                 
                                 if( r != NULL &&
                                     targetObj->numSlots > 0 ) {
@@ -21352,6 +21431,20 @@ int main() {
                         char accessBlocked = 
                             isAccessBlocked( nextPlayer, 
                                              m.x, m.y, target );
+
+                        GridPos playerPos = getPlayerPos( nextPlayer );
+                        
+                        if( playerPos.x != m.x || playerPos.y != m.y ) {
+                            if( ! isBiomeAllowedForPlayer( nextPlayer,
+                                                           playerPos.x,
+                                                           playerPos.y ) ) {
+                                // don't allow player to drop/swap
+                                // from a bad biome into a good one
+                                // (they might be in a vehicle in the bad biome)
+                                accessBlocked = true;
+                                }
+                            }
+                        
                         
                         if( ! accessBlocked )
                         if( isBiomeAllowedForPlayer( nextPlayer, m.x, m.y ) )
