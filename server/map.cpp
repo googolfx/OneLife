@@ -536,6 +536,10 @@ typedef struct Homeland {
         
         char changed;
         
+        // did the creation of this homeland tapout-trigger
+        // a +primaryHomeland object?
+        char primary;
+        
     } Homeland;
 
 
@@ -560,6 +564,22 @@ static Homeland *getHomeland( int inX, int inY,
         if( ! h->expired && h->lastBabyBirthTime < tooOldTime ) {
             h->expired = true;
             h->changed = true;
+
+
+            if( ! h->primary ) {
+                // apply expiration transition to whatever is at center of
+                // non-primary homeland 
+                // (object operating on itself defines this)
+            
+                int centerID = getMapObject( h->x, h->y );
+                
+                if( centerID > 0 ) {
+                    TransRecord *expireTrans = getTrans( centerID, centerID );
+                    if( expireTrans != NULL ) {
+                        setMapObject( h->x, h->y, expireTrans->newTarget );
+                        }
+                    }
+                }
             }
 
         
@@ -580,10 +600,10 @@ static Homeland *getHomeland( int inX, int inY,
 
 
 
-static char hasHomeland( int inLineageEveID ) {
+static char hasPrimaryHomeland( int inLineageEveID ) {
     for( int i=0; i<homelands.size(); i++ ) {
         Homeland *h = homelands.getElement( i );
-        if( h->lineageEveID == inLineageEveID ) {
+        if( h->primary && h->lineageEveID == inLineageEveID ) {
             return true;
             }
         }
@@ -6798,13 +6818,16 @@ static int neighborWallAgree( int inX, int inY, ObjectRecord *inSetO,
     
 
 
-
-static void runTapoutOperation( int inX, int inY, 
+// returns true if tapout-triggered a +primaryHomeland object
+static char runTapoutOperation( int inX, int inY, 
                                 int inRadiusX, int inRadiusY,
                                 int inSpacingX, int inSpacingY,
                                 int inTriggerID,
-                                char inPlayerHasHomeland,
+                                char inPlayerHasPrimaryHomeland,
                                 char inIsPost = false ) {
+
+    char returnVal = false;
+    
     for( int y =  inY - inRadiusY; 
          y <= inY + inRadiusY; 
          y += inSpacingY ) {
@@ -6887,14 +6910,19 @@ static void runTapoutOperation( int inX, int inY,
                 }
 
             if( newTarget != -1 ) {
-                if( inPlayerHasHomeland ) {
-                    // block creation of objects that require +primaryHomeland
-                    // player already has a homeland
-                    ObjectRecord *nt = getObject( newTarget );
+                ObjectRecord *nt = getObject( newTarget );
+                
+                if( strstr( nt->description, "+primaryHomeland" ) != NULL ) {
+                    if( inPlayerHasPrimaryHomeland ) {
+                        // block creation of objects that require 
+                        // +primaryHomeland
+                        // player already has a primary homeland
                     
-                    if( strstr( nt->description, 
-                                "+primaryHomeland" ) != NULL ) {
                         newTarget = -1;
+                        }
+                    else {
+                        // created a +primaryHomeland object
+                        returnVal = true;
                         }
                     }
                 }
@@ -6904,6 +6932,8 @@ static void runTapoutOperation( int inX, int inY,
                 }
             }
         }
+    
+    return returnVal;
     }
 
 
@@ -6940,7 +6970,9 @@ void setMapObjectRaw( int inX, int inY, int inID ) {
         o = getObject( inID );
         }
 
-
+    
+    char tappedOutPrimaryHomeland = false;
+    
 
     if( o->isFlightLanding ) {
         GridPos p = { inX, inY };
@@ -7172,7 +7204,7 @@ void setMapObjectRaw( int inX, int inY, int inID ) {
     else if( o->isTapOutTrigger ) {
         // this object, when created, taps out other objects in grid around
 
-        char playerHasHomeland = false;
+        char playerHasPrimaryHomeland = false;
         
         if( currentResponsiblePlayer != -1 ) {
             int pID = currentResponsiblePlayer;
@@ -7182,7 +7214,7 @@ void setMapObjectRaw( int inX, int inY, int inID ) {
             int lineage = getPlayerLineage( pID );
             
             if( lineage != -1 ) {
-                playerHasHomeland = hasHomeland( lineage );
+                playerHasPrimaryHomeland = hasPrimaryHomeland( lineage );
                 }
             }
         
@@ -7194,11 +7226,12 @@ void setMapObjectRaw( int inX, int inY, int inID ) {
         
         if( r != NULL ) {
 
+            tappedOutPrimaryHomeland = 
             runTapoutOperation( inX, inY, 
                                 r->limitX, r->limitY,
                                 r->gridSpacingX, r->gridSpacingY, 
                                 inID,
-                                playerHasHomeland );
+                                playerHasPrimaryHomeland );
             
             
             r->buildCount++;
@@ -7207,11 +7240,12 @@ void setMapObjectRaw( int inX, int inY, int inID ) {
                 r->buildCount >= r->buildCountLimit ) {
                 // hit limit!
                 // tapout a larger radius now
+                tappedOutPrimaryHomeland =
                 runTapoutOperation( inX, inY, 
                                     r->postBuildLimitX, r->postBuildLimitY,
                                     r->gridSpacingX, r->gridSpacingY, 
                                     inID, 
-                                    playerHasHomeland, true );
+                                    playerHasPrimaryHomeland, true );
                 }
             }
         
@@ -7241,7 +7275,8 @@ void setMapObjectRaw( int inX, int inY, int inID ) {
                                   t,
                                   false,
                                   // changed
-                                  true };
+                                  true,
+                                  tappedOutPrimaryHomeland };
                 homelands.push_back( newH );
                 }
             else if( h->expired ) {

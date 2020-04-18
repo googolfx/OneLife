@@ -431,15 +431,23 @@ static int getLocationKeyPriority( const char *inPersonKey ) {
         strcmp( inPersonKey, "expt" ) == 0 ) {
         return 1;
         }
-    else if( strcmp( inPersonKey, "lead" ) == 0 ||
-             strcmp( inPersonKey, "supp" ) == 0 ) {
+    else if( strcmp( inPersonKey, "owner" ) == 0 ) {
         return 2;
         }
-    else if( strcmp( inPersonKey, "baby" ) == 0 ) {
+    else if( strcmp( inPersonKey, "lead" ) == 0 ||
+             strcmp( inPersonKey, "supp" ) == 0 ) {
         return 3;
         }
-    else {
+    else if( strcmp( inPersonKey, "baby" ) == 0 ) {
         return 4;
+        }
+    else if( strcmp( inPersonKey, "visitor" ) == 0 ) {
+        // don't bug owner with spurious visitor arrows, unless there
+        // is nothing else going on
+        return 5;
+        }
+    else {
+        return 6;
         }
     }
     
@@ -480,6 +488,7 @@ static char doesNewTempLocationTrumpPrevious( const char *inPersonKey ) {
 
 static void addTempHomeLocation( int inX, int inY, 
                                  char inPerson, int inPersonID,
+                                 LiveObject *inPersonO,
                                  const char *inPersonKey ) {
     if( ! doesNewTempLocationTrumpPrevious( inPersonKey ) ) {
         // existing key has higher priority
@@ -515,6 +524,16 @@ static void addTempHomeLocation( int inX, int inY,
         
         p.personID = inPersonID;
         p.tempPersonKey = inPersonKey;
+                                            
+        if( inPersonO != NULL && 
+            inPersonO->currentSpeech != NULL &&
+            inPersonO->speechIsOverheadLabel ) {
+            // clear any old label speech 
+            // to make room for new label
+            delete [] inPersonO->currentSpeech;
+            inPersonO->currentSpeech = NULL;
+            inPersonO->speechIsOverheadLabel = false;
+            }
         }
 
     homePosStack.push_back( p );
@@ -13500,6 +13519,7 @@ void LivingLifePage::step() {
 
                         o->speechFadeETATime = curTime + 3;
                         o->speechIsCurseTag = false;
+                        o->speechIsOverheadLabel = false;
                         }
                     }
                 }
@@ -15677,7 +15697,8 @@ void LivingLifePage::step() {
                 o.speechIsSuccessfulCurse = false;
                 o.speechIsCurseTag = false;
                 o.lastCurseTagDisplayTime = 0;
-
+                o.speechIsOverheadLabel = false;
+                
                 o.heldByAdultID = -1;
                 o.heldByAdultPendingID = -1;
                 
@@ -18540,24 +18561,43 @@ void LivingLifePage::step() {
                             
                             LiveObject *existing = gameObjects.getElement(j);
                             
-                            if( existing->currentSpeech != NULL ) {
-                                delete [] existing->currentSpeech;
-                                existing->currentSpeech = NULL;
-                                }
-                            
                             char *firstSpace = strstr( lines[i], " " );
-        
+                            
+                            char famSpeech = false;
                             if( firstSpace != NULL ) {
-                                existing->currentSpeech = 
-                                    stringDuplicate( &( firstSpace[1] ) );
+                                // check for +FAMILY+
+                                // only show it if the person is NOT
+                                // currently talking, but remember it
+                                // (Don't interrupt speech with spurious
+                                //  +FAMILY+ indicators)
                                 
-                                char famSpeech = false;
-                                if( strcmp( existing->currentSpeech, 
+                                if( strcmp( &( firstSpace[1] ), 
                                             "+FAMILY+" ) == 0 ) {
                                     existing->isGeneticFamily = true;
                                     famSpeech = true;
-                                    
+
+                                    if( existing->currentSpeech != NULL ) {
+                                        // we learned their family status
+                                        // but don't make them say +FAMILY+
+                                        // because they have a current speech
+                                        // bubble
+                                        firstSpace = NULL;
+                                        }
                                     }
+                                }
+                            
+
+
+                            if( firstSpace != NULL ) {
+                                
+                                if( existing->currentSpeech != NULL ) {
+                                    delete [] existing->currentSpeech;
+                                    existing->currentSpeech = NULL;
+                                    }
+                                
+                                existing->currentSpeech = 
+                                    stringDuplicate( &( firstSpace[1] ) );
+                                
 
                                 double curTime = game_getCurrentTime();
                                 
@@ -18589,7 +18629,10 @@ void LivingLifePage::step() {
                                 else {
                                     existing->speechIsCurseTag = false;
                                     }
-                                
+
+                                existing->speechIsOverheadLabel = false;
+
+
                                 // longer time for longer speech
                                 existing->speechFadeETATime = 
                                     curTime + 3 +
@@ -18662,9 +18705,7 @@ void LivingLifePage::step() {
                                             }
 
 
-                                        char leader = false;
-                                        
-                                        if( ! baby ) {
+                                        if( ! person ) {
                                             char *leaderPos = 
                                                 strstr( 
                                                     existing->currentSpeech, 
@@ -18672,7 +18713,6 @@ void LivingLifePage::step() {
                                             
                                             if( leaderPos != NULL ) {
                                                 person = true;
-                                                leader = true;
                                                 sscanf( leaderPos, 
                                                     " *leader %d", &personID );
 
@@ -18680,11 +18720,10 @@ void LivingLifePage::step() {
                                                 personKey = "lead";
                                                 }
                                             }
-
                                         
                                         char follower = false;
                                         
-                                        if( ! baby && ! leader ) {
+                                        if( ! person ) {
                                             char *follPos = 
                                                 strstr( 
                                                     existing->currentSpeech, 
@@ -18703,9 +18742,8 @@ void LivingLifePage::step() {
                                             }
                                         
                                         
-                                        char expert = false;
                                         
-                                        if( ! baby && ! leader && ! follower ) {
+                                        if( ! person ) {
                                             char *expertPos = 
                                                 strstr( 
                                                     existing->currentSpeech, 
@@ -18719,13 +18757,10 @@ void LivingLifePage::step() {
 
                                                 expertPos[0] = '\0';
                                                 personKey = "expt";
-                                                
-                                                expert = true;
                                                 }
                                             }
                                         
-                                        if( ! baby && ! leader && ! follower &&
-                                            ! expert ) {
+                                        if( ! person ) {
                                             char *ownerPos = 
                                                 strstr( 
                                                     existing->currentSpeech, 
@@ -18741,14 +18776,37 @@ void LivingLifePage::step() {
                                                 personKey = "owner";
                                                 }
                                             }
-                                        
-                                        
 
+
+                                        if( ! person ) {
+                                            char *visitorPos = 
+                                                strstr( 
+                                                    existing->currentSpeech, 
+                                                    " *visitor" );
+                                            
+                                            if( visitorPos != NULL ) {
+                                                person = true;
+                                                sscanf( visitorPos, 
+                                                        " *visitor %d", 
+                                                        &personID );
+
+                                                visitorPos[0] = '\0';
+                                                personKey = "visitor";
+                                                }
+                                            }
+                                        
+                                        
+                                        LiveObject *personO = NULL;
+                                        if( personID > 0 ) {
+                                            personO = getLiveObject( personID );
+                                            }
+                                        
 
                                         if( numRead == 2 || numRead == 3 ) {
                                             addTempHomeLocation( mapX, mapY,
                                                                  person,
                                                                  personID,
+                                                                 personO,
                                                                  personKey );
                                             }
 
@@ -19237,6 +19295,7 @@ void LivingLifePage::step() {
                                 existing->speechIsSuccessfulCurse = false;
                                 existing->speechIsCurseTag = true;
                                 existing->lastCurseTagDisplayTime = curTime;
+                                existing->speechIsOverheadLabel = false;
                                 }
                             break;
                             }
@@ -20109,7 +20168,9 @@ void LivingLifePage::step() {
 
         }
     
-    
+
+    HomePos *curHomePosRecord = getHomePosRecord();
+            
     // update all positions for moving objects
     if( !mapPullMode )
     for( int i=0; i<gameObjects.size(); i++ ) {
@@ -20140,6 +20201,7 @@ void LivingLifePage::step() {
                             curTime + 3 +
                             strlen( o->currentSpeech ) / 5;
                         o->speechIsCurseTag = true;
+                        o->speechIsOverheadLabel = false;
                         o->lastCurseTagDisplayTime = curTime;
                         }
                     }
@@ -20156,9 +20218,38 @@ void LivingLifePage::step() {
                     curTime + 3 +
                     strlen( o->currentSpeech ) / 5;
                 o->speechIsCurseTag = true;
+                o->speechIsOverheadLabel = false;
                 o->lastCurseTagDisplayTime = curTime;
                 }
             }
+
+        if( o->currentSpeech == NULL ) {
+            // check if we have an arrow to them
+            
+            if( curHomePosRecord != NULL &&
+                curHomePosRecord->temporary && 
+                curHomePosRecord->tempPerson && 
+                curHomePosRecord->personID == o->id &&
+                curHomePosRecord->tempPersonKey != NULL ) {
+                
+                char *transKey = autoSprintf( "%sLabel", 
+                                              curHomePosRecord->tempPersonKey );
+                
+                const char *label = translate( transKey );
+                
+                delete [] transKey;
+                
+                o->currentSpeech = stringDuplicate( label );
+                
+                // expire along with arrow
+                // unless interrupted by other speech
+                o->speechFadeETATime = 
+                    curHomePosRecord->temporaryExpireETA;
+                o->speechIsCurseTag = false;
+                o->speechIsOverheadLabel = true;
+                }
+            }
+        
         
         
         if( o->currentEmot != NULL ) {
@@ -24481,6 +24572,7 @@ void LivingLifePage::keyDown( unsigned char inASCII ) {
                                             curTime + 3 +
                                             strlen( famO->currentSpeech ) / 5;
                                         famO->speechIsCurseTag = false;
+                                        famO->speechIsOverheadLabel = false;
                                         }
                                     }
                                 }
@@ -24547,6 +24639,7 @@ void LivingLifePage::keyDown( unsigned char inASCII ) {
                                         curTime + 3 +
                                         strlen( follO->currentSpeech ) / 5;
                                     follO->speechIsCurseTag = false;
+                                    follO->speechIsOverheadLabel = false;
                                     }
                                 }
                             }
